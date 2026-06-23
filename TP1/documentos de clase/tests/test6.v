@@ -17,11 +17,11 @@ begin
   for(q=0; q<20; q=q+1)
   begin
 
-    i_sw[0]   = 'd1                 ;
+    i_sw[0]   = 'd1                 ; // habilitado
     i_sw[2:1] = $urandom_range(0,3) ;
     i_sw[3]   = $urandom_range(0,1) ;
 
-    reset();
+    reset(); // lanza un shift
 
     // Corremos 2..14 ciclos: con limit_0=16 el contador no llega a wrapear,
     // por lo que queda en [2..14] (distinto de 0) y shift_register en 4'b0100 (distinto de 1000).
