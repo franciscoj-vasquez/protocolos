@@ -4,8 +4,8 @@
 // A partir de ahi, el periodo entre shifts es (limit + 1) ciclos de clock,S
 
 integer             sel            ; // seleccion de limite (0 a 3, mapea a i_sw[2:1])
-integer             cycle_count    ; // ciclos contados entre shifts consecutivos
-integer             rep            ; // repeticion del periodo dentro de cada sel
+integer             cycle_count    ;
+integer             rep            ;
 reg  [N_LED - 1:0]  snap_led       ; // captura de o_led al inicio de cada periodo
 reg  [NB_COUNTER-1:0] expected_period; // periodo esperado segun el limite activo
 
