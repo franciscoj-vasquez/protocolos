@@ -1,5 +1,4 @@
 // TEST6: verifica el reset asincrono del sistema.
-// Con el clock congelado, al asertar i_reset=0:
 //   - counter debe ir a 0 sin necesidad de un flanco de clock
 //   - shift_register debe volver a 4'b1000 sin necesidad de un flanco de clock
 //   - o_led debe reflejar el reset inmediatamente
@@ -18,14 +17,12 @@ begin
   begin
 
     i_sw[0]   = 'd1                 ; // habilitado
-    i_sw[2:1] = $urandom_range(0,3) ;
+    i_sw[2:1] = 2'b11               ; // limit_3 = 128: counter mas alto sin riesgo de wrap
     i_sw[3]   = $urandom_range(0,1) ;
 
     reset(); // lanza un shift
 
-    // Corremos 2..14 ciclos: con limit_0=16 el contador no llega a wrapear,
-    // por lo que queda en [2..14] (distinto de 0) y shift_register en 4'b0100 (distinto de 1000).
-    repeat($urandom_range(2,14)) @(posedge clock);
+    repeat($urandom_range(2,100)) @(posedge clock);
     #1; // NBAs del ultimo flanco asentadas
 
     // Verificamos precondicion: el estado debe ser distinto al de reset

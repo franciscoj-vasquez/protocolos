@@ -1,4 +1,4 @@
-// TEST4: verifica el comportamiento al cambiar el limite del contador en caliente.
+// TEST4: verifica el comportamiento al cambiar el limite del contador.
 //
 // Caso A (limite mayor → limite menor): si counter > nuevo limite, el contador
 //         debe resetearse a 0 en el siguiente posedge, y el shift_register debe
@@ -33,10 +33,9 @@ begin
 
     reset();
 
-    // Despues de reset el primer posedge shiftea y counter pasa a 1.
     // Tras 30 posedges mas: counter = 30  (16 < 30 < 128).
     repeat(30) @(posedge clock);
-    #1; // dejar que las NBAs del ultimo flanco se completen
+    #1; 
 
     // Capturamos shift_register antes de cambiar el limite
     prev_shift_reg = u_top_leds.u_shift_reg.shift_register ;
