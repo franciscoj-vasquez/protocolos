@@ -22,12 +22,10 @@ begin
   for(m=0; m<20; m=m+1)
   begin
 
-    // ================================================================
     // CASO A: limite mayor -> limite menor
     // Corremos con limit_3 (128). Avanzamos 30 ciclos: counter = 30.
     // 30 > limit_0 (16), por lo que al cambiar a limit_0 el contador
     // debe resetearse en el siguiente posedge y shiftear en el siguiente.
-    // ================================================================
     i_sw[0]   = 'd1                 ;
     i_sw[2:1] = 2'b11               ; // limit_3 = 128
     i_sw[3]   = $urandom_range(0,1) ;
