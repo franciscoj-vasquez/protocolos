@@ -12,6 +12,14 @@
 // Inyección de errores:
 //   inject_error=1 : checker recibe ~gen_o_data (inversión garantiza mismatch)
 //   inject_error=0 : checker recibe gen_o_data  (datos reales del generador)
+//
+// Conexión de valid (generador → checker):
+//   u_chk.i_valid se conecta a gen_o_valid (salida registrada del generador),
+//   no al wire i_valid del testbench. gen_o_valid "viaja con" gen_o_data un
+//   ciclo por detrás de i_valid, así que send_valid/send_invalid agregan un
+//   flanco de drenaje al final de cada ráfaga para que el checker alcance a
+//   procesar el último dato antes de que la tarea retorne; con eso, CYCLES_TO_LOCK
+//   y todos los conteos de ráfagas existentes siguen valiendo sin cambios.
 // =============================================================================
 
 `timescale 1ns / 1ps
@@ -31,8 +39,9 @@ module tb_lfsr_system;
     localparam RST_MIN_NS = 1_000;
     localparam RST_MAX_NS = 250_000;
 
-    // Ciclos de valid necesarios para lockear desde ACQUIRE:
-    //   1 ciclo de ACQUIRE + LOCK_THRESHOLD ciclos en UNLOCKED
+    // Ciclos de valid necesarios para lockear desde un reset:
+    //   1 ciclo de resync (1er ciclo en UNLOCKED, centinela garantiza mismatch)
+    //   + LOCK_THRESHOLD aciertos consecutivos en UNLOCKED
     localparam CYCLES_TO_LOCK = 1 + LOCK_THRESHOLD;
 
     // =========================================================================
@@ -46,6 +55,7 @@ module tb_lfsr_system;
     reg                    i_valid;
     reg  [DATA_WIDTH-1:0]  i_seed;
     wire [DATA_WIDTH-1:0]  gen_o_data;
+    wire                   gen_o_valid;
 
     // Checker
     reg                    chk_rst;
@@ -68,7 +78,8 @@ module tb_lfsr_system;
         .i_soft_reset(gen_soft_rst),
         .i_valid     (i_valid),
         .i_seed      (i_seed),
-        .o_data      (gen_o_data)
+        .o_data      (gen_o_data),
+        .o_valid     (gen_o_valid)
     );
 
     lfsr_checker #(
@@ -78,7 +89,7 @@ module tb_lfsr_system;
     ) u_chk (
         .i_clk   (i_clk),
         .i_rst   (chk_rst),
-        .i_valid (i_valid),
+        .i_valid (gen_o_valid),
         .i_data  (chk_i_data),
         .o_lock  (o_lock)
     );
@@ -133,6 +144,10 @@ module tb_lfsr_system;
 
     // =========================================================================
     // Task: send_valid — N ciclos de datos correctos (inject_error=0)
+    //   El flanco extra @(posedge i_clk) tras bajar i_valid es un drenaje:
+    //   gen_o_valid está un ciclo detrás de i_valid, así que el checker recién
+    //   ve el N-ésimo dato en ese flanco. Sin él, la última ráfaga se perdería
+    //   (el mismo tipo de carrera que ya se había corregido una vez, ver README).
     // =========================================================================
     task send_valid;
         input integer n;
@@ -142,12 +157,15 @@ module tb_lfsr_system;
             repeat (n) @(posedge i_clk);
             @(negedge i_clk);
             i_valid = 1'b0;
+            @(posedge i_clk);   // drenaje: deja que el checker procese el último dato
             #1;
         end
     endtask
 
     // =========================================================================
     // Task: send_invalid — N ciclos de datos erróneos (inject_error=1)
+    //   inject_error se mantiene alto durante el flanco de drenaje para que el
+    //   último dato que el checker procesa siga llegando invertido.
     // =========================================================================
     task send_invalid;
         input integer n;
@@ -157,6 +175,7 @@ module tb_lfsr_system;
             repeat (n) @(posedge i_clk);
             @(negedge i_clk);
             i_valid      = 1'b0;
+            @(posedge i_clk);   // drenaje: deja que el checker procese el último dato
             inject_error = 1'b0;
             #1;
         end
@@ -168,7 +187,7 @@ module tb_lfsr_system;
     task lock_checker;
         begin
             reset_checker();
-            send_valid(CYCLES_TO_LOCK);   // 1 ACQUIRE + 5 UNLOCKED → LOCKED
+            send_valid(CYCLES_TO_LOCK);   // 1 resync + 5 aciertos en UNLOCKED → LOCKED
         end
     endtask
 
@@ -182,8 +201,6 @@ module tb_lfsr_system;
     // Secuencia principal
     // =========================================================================
     initial begin
-        $dumpfile("tb_lfsr_system.vcd");
-        $dumpvars(0, tb_lfsr_system);
 
         // Inicialización
         gen_rst      = 1'b0;
@@ -260,18 +277,16 @@ module tb_lfsr_system;
 
         // =================================================================
         // TEST 2: Frontera lock — 4 válidos + 1 inválido → nunca lockea
-        //   Secuencia: 1 ACQUIRE + 4 UNLOCKED(valid) + 1 inválido
-        //   valid_cnt llega a 4 (==LOCK_THRESHOLD-1) pero falta un acierto más.
-        //   El inválido resetea valid_cnt → vuelve a ACQUIRE sin haber lockeado.
+        //   Secuencia: 1 resync + 4 aciertos en UNLOCKED + 1 inválido
         // =================================================================
         $display("\n[TEST 2] Frontera lock: 4 válidos + 1 inválido → nunca debe lockear");
 
         reset_generator();
         reset_checker();
 
-        send_valid(1);       // ciclo ACQUIRE
+        send_valid(1);       // ciclo de resync (1er ciclo en UNLOCKED)
         send_valid(4);       // 4 checks en UNLOCKED: valid_cnt = 1, 2, 3, 4
-        send_invalid(1);     // mismatch → valid_cnt = 0, state → ACQUIRE
+        send_invalid(1);     // mismatch → valid_cnt = 0, sigue en UNLOCKED
 
         if (!o_lock)
             $display("  PASS: checker nunca lockeó");
@@ -281,7 +296,6 @@ module tb_lfsr_system;
         // =================================================================
         // TEST 3: Frontera unlock — lockeado + (2 inv + 1 val)×10 → nunca desbloquea
         //   El patrón de 2 inválidos nunca alcanza UNLOCK_THRESHOLD=3
-        //   consecutivos antes de que un válido resetee invalid_cnt.
         // =================================================================
         $display("\n[TEST 3] Frontera unlock: lockeado + (2 inv + 1 val)×10 → nunca desbloquea");
 
@@ -306,7 +320,7 @@ module tb_lfsr_system;
 
         // =================================================================
         // TEST 4: Transición — (5 val + 3 inv)×5 → siempre alterna lock/unlock
-        //   5 válidos desde ACQUIRE → lock; 3 inválidos → unlock; repetir.
+        //   5 válidos tras el resync → lock; 3 inválidos → unlock; repetir.
         // =================================================================
         $display("\n[TEST 4] Transición: patrón (5 val + 3 inv)×5 — debe alternar lock/unlock");
 
@@ -315,7 +329,7 @@ module tb_lfsr_system;
 
         fail_flag = 0;
         for (idx = 0; idx < 5; idx = idx + 1) begin
-            // Lock desde ACQUIRE (1 ACQUIRE + 5 UNLOCKED)
+            // Lock desde el resync (1 resync + 5 aciertos en UNLOCKED)
             send_valid(CYCLES_TO_LOCK);
             if (!o_lock) begin
                 $display("  FAIL [iter %0d]: no lockeó tras %0d válidos", idx, CYCLES_TO_LOCK);

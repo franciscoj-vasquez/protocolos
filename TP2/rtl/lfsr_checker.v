@@ -1,22 +1,36 @@
 // =============================================================================
 // Module  : lfsr_checker
-// Purpose : Verifica en tiempo real que la salida del generador LFSR
-//           corresponde a la secuencia PRBS esperada.
 //
 // Funcionamiento:
-//   1. ACQUIRE  : captura el estado actual del generador para sincronizar la
-//                 referencia interna. No cuenta errores ni aciertos.
-//   2. UNLOCKED : compara cada nuevo dato con el valor predicho; acumula
-//                 aciertos consecutivos → lock al alcanzar LOCK_THRESHOLD.
-//   3. LOCKED   : acumula errores consecutivos → unlock al alcanzar
+//   1. UNLOCKED : compara cada dato con el valor predicho (lfsr_ref_next).
+//                 Acierto  → acumula valid_cnt; lock al alcanzar LOCK_THRESHOLD.
+//                 Error    → no hay estado especial para esto: simplemente no
+//                             hay (todavía) con qué comparar, así que i_data se
+//                             toma como nueva referencia y valid_cnt se reinicia.
+//                             Esto cubre tanto la falta de sincronización
+//                             inicial como cualquier desincronización futura,
+//                             sin gastar un estado ni un ciclo aparte.
+//   2. LOCKED   : acumula errores consecutivos → unlock al alcanzar
 //                 UNLOCK_THRESHOLD. Un acierto resetea el contador de errores.
+//                 Al desbloquear, lfsr_ref se fuerza al centinela 0 (ver abajo)
+//                 en vez de seguir prediciendo, para no arrastrar una
+//                 referencia contaminada por los datos inválidos recién vistos.
+//
+// Centinela lfsr_ref = 0: la secuencia PRBS nunca pasa por el estado 0 (no es
+// parte del ciclo maximal de 2^16-1 estados no nulos), así que es un valor
+// "imposible de acertar por casualidad". Se usa en el reset y tras cada
+// desbloqueo para garantizar que la primera comparación posterior SIEMPRE
+// falla a propósito y dispara la resincronización de UNLOCKED, en vez de
+// arriesgarse a que coincida por casualidad con el dato real (p. ej. si se
+// hubiera sembrado con DEFAULT_SEED, que es justo el valor con el que suele
+// arrancar el generador).
 //
 // Invariante: lfsr_ref está siempre un paso por detrás del generador, de modo
 //             que lfsr_ref_next = valor esperado en el próximo ciclo i_valid.
 //
 // Ports:
 //   i_clk   : clock del sistema
-//   i_rst   : reset asíncrono (activo alto) → vuelve a ACQUIRE
+//   i_rst   : reset asíncrono (activo alto) → vuelve a UNLOCKED
 //   i_valid : habilita la evaluación (debe coincidir con el del generador)
 //   i_data  : salida del generador LFSR
 //   o_lock  : HIGH cuando el checker está bloqueado (secuencia verificada)
@@ -24,8 +38,8 @@
 
 module lfsr_checker #(
     parameter DATA_WIDTH       = 16,
-    parameter LOCK_THRESHOLD   = 5,    // aciertos consecutivos para lockear
-    parameter UNLOCK_THRESHOLD = 3     // errores consecutivos para deslockear
+    parameter LOCK_THRESHOLD   = 5,
+    parameter UNLOCK_THRESHOLD = 3
 )(
     input                    i_clk,
     input                    i_rst,
@@ -37,18 +51,16 @@ module lfsr_checker #(
     // -------------------------------------------------------------------------
     // Estados internos
     // -------------------------------------------------------------------------
-    localparam ST_ACQUIRE  = 2'd0;   // sincronizando referencia
-    localparam ST_UNLOCKED = 2'd1;   // contando aciertos hacia el lock
-    localparam ST_LOCKED   = 2'd2;   // verificando, contando errores hacia unlock
+    localparam ST_UNLOCKED = 1'b0;
+    localparam ST_LOCKED   = 1'b1;
 
-    reg [1:0]            state;
+    reg                  state;
     reg [DATA_WIDTH-1:0] lfsr_ref;       // referencia interna (un paso atrás)
     reg [3:0]            valid_cnt;      // aciertos consecutivos
     reg [3:0]            invalid_cnt;    // errores consecutivos
 
     // -------------------------------------------------------------------------
     // Función de paso del LFSR — misma topología y polinomio que el generador
-    //   x^16 + x^14 + x^13 + x^11 + 1  (Galois, taps en bits 11, 13, 14)
     // -------------------------------------------------------------------------
     function [DATA_WIDTH-1:0] lfsr_step;
         input [DATA_WIDTH-1:0] s;
@@ -82,70 +94,58 @@ module lfsr_checker #(
     // -------------------------------------------------------------------------
     always @(posedge i_clk or posedge i_rst) begin
         if (i_rst) begin
-            state       <= ST_ACQUIRE;
-            lfsr_ref    <= {DATA_WIDTH{1'b0}};
+            state       <= ST_UNLOCKED;
+            lfsr_ref    <= {DATA_WIDTH{1'b0}};   // la primer comparacion se errara
             valid_cnt   <= 4'd0;
             invalid_cnt <= 4'd0;
             o_lock      <= 1'b0;
 
         end else if (i_valid) begin
-            case (state)
-
-                // -------------------------------------------------------------
-                // ACQUIRE: seedea la referencia con el estado actual del
-                // generador y pasa a verificar desde el próximo ciclo.
-                // -------------------------------------------------------------
-                ST_ACQUIRE: begin
-                    lfsr_ref    <= i_data;
-                    valid_cnt   <= 4'd0;
-                    invalid_cnt <= 4'd0;
-                    state       <= ST_UNLOCKED;
-                end
-
-                // -------------------------------------------------------------
+            if (state == ST_UNLOCKED) begin
+                // ---------------------------------------------------------------
                 // UNLOCKED: compara i_data con el próximo valor predicho.
-                //   Acierto → acumula valid_cnt.
-                //   Error   → vuelve a ACQUIRE (re-sincronización necesaria).
-                // -------------------------------------------------------------
-                ST_UNLOCKED: begin
-                    lfsr_ref <= lfsr_ref_next;   // siempre avanza en paralelo al generador
-
-                    if (i_data == lfsr_ref_next) begin
-                        if (valid_cnt == LOCK_THRESHOLD - 1) begin
-                            o_lock    <= 1'b1;
-                            valid_cnt <= 4'd0;
-                            state     <= ST_LOCKED;
-                        end else
-                            valid_cnt <= valid_cnt + 4'd1;
-                    end else begin
+                //   Acierto → acumula valid_cnt; lock al alcanzar LOCK_THRESHOLD.
+                //   Error   → no hay con qué comparar todavía (o se perdió la
+                //             sincronía): se toma i_data como nueva referencia
+                //             y se reinicia valid_cnt. Sin esto no hace falta
+                //             un estado ACQUIRE separado.
+                // ---------------------------------------------------------------
+                if (i_data == lfsr_ref_next) begin
+                    lfsr_ref <= i_data;
+                    if (valid_cnt == LOCK_THRESHOLD - 1) begin
+                        o_lock    <= 1'b1;
                         valid_cnt <= 4'd0;
-                        state     <= ST_ACQUIRE;
-                    end
+                        state     <= ST_LOCKED;
+                    end else
+                        valid_cnt <= valid_cnt + 4'd1;
+                end else begin
+                    lfsr_ref  <= i_data;
+                    valid_cnt <= 4'd0;
                 end
 
-                // -------------------------------------------------------------
+            end else begin // ST_LOCKED
+                // ---------------------------------------------------------------
                 // LOCKED: compara i_data con el próximo valor predicho.
                 //   Acierto → resetea invalid_cnt (buena secuencia continúa).
-                //   Error   → acumula invalid_cnt hasta desbloquear.
-                // -------------------------------------------------------------
-                ST_LOCKED: begin
-                    lfsr_ref <= lfsr_ref_next;
-
-                    if (i_data == lfsr_ref_next) begin
-                        invalid_cnt <= 4'd0;
-                    end else begin
-                        if (invalid_cnt == UNLOCK_THRESHOLD - 1) begin
-                            o_lock      <= 1'b0;
-                            invalid_cnt <= 4'd0;
-                            state       <= ST_ACQUIRE;
-                        end else
-                            invalid_cnt <= invalid_cnt + 4'd1;
-                    end
+                //   Error   → acumula invalid_cnt hasta desbloquear; al
+                //             desbloquear, lfsr_ref vuelve al centinela en vez
+                //             de seguir prediciendo, para no arrastrar una
+                //             referencia contaminada por los últimos datos
+                //             inválidos vistos.
+                // ---------------------------------------------------------------
+                if (i_data == lfsr_ref_next) begin
+                    lfsr_ref    <= i_data;
+                    invalid_cnt <= 4'd0;
+                end else if (invalid_cnt == UNLOCK_THRESHOLD - 1) begin
+                    o_lock      <= 1'b0;
+                    invalid_cnt <= 4'd0;
+                    state       <= ST_UNLOCKED;
+                    lfsr_ref    <= {DATA_WIDTH{1'b0}};   // centinela, igual que en el reset
+                end else begin
+                    lfsr_ref    <= lfsr_ref_next;        // sigue prediciendo pese al error transitorio
+                    invalid_cnt <= invalid_cnt + 4'd1;
                 end
-
-                default: state <= ST_ACQUIRE;
-
-            endcase
+            end
         end
     end
 

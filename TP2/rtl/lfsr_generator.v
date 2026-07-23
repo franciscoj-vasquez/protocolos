@@ -2,18 +2,23 @@
 // Module  : lfsr_generator
 // Purpose : 16-bit Galois LFSR pseudo-random bit sequence generator.
 //
-// Polynomial : x^16 + x^14 + x^13 + x^11 + 1
-// Taps (0-idx): bits 11, 13, 14  →  max period = 2^16 - 1 = 65 535 states
-//
 // Reset behaviour
 //   i_rst       (async, active-high) : loads DEFAULT_SEED immediately,
 //                                      independent of the clock.
 //   i_soft_reset (sync, active-high) : captures i_seed on the rising clock
-//                                      edge (seed is programmable at runtime).
+//                                      edge.
 //
 // Shift control
 //   i_valid : the register advances only when this signal is asserted.
 //             When de-asserted the current state is held.
+//
+// o_valid
+//   Registered, one-cycle companion of o_data: it must always travel
+//   alongside the data it qualifies, so it is flopped through the exact
+//   same priority chain as `lfsr` instead of being a bare echo of i_valid.
+//   o_valid = 1 only on cycles where o_data is a genuine PRBS advance
+//   (the i_valid branch actually won that cycle); it reads 0 after a
+//   reset/seed load or a hold, since that data isn't a fresh sequence step.
 // =============================================================================
 
 module lfsr_generator #(
@@ -25,7 +30,8 @@ module lfsr_generator #(
     input                       i_soft_reset, // sync  reset  → i_seed value
     input                       i_valid,      // shift enable
     input  [DATA_WIDTH-1:0]     i_seed,       // runtime-configurable seed
-    output [DATA_WIDTH-1:0]     o_data
+    output [DATA_WIDTH-1:0]     o_data,
+    output reg                  o_valid       // registered companion of o_data
 );
 
     reg [DATA_WIDTH-1:0] lfsr;
@@ -56,15 +62,22 @@ module lfsr_generator #(
 
     // -------------------------------------------------------------------------
     // Sequential logic — priority: i_rst > i_soft_reset > i_valid
+    // o_valid mirrors, edge for edge, whether THIS update is the i_valid
+    // branch (a real advance) so it stays truthfully paired with o_data.
     // -------------------------------------------------------------------------
     always @(posedge i_clk or posedge i_rst) begin
-        if (i_rst)
-            lfsr <= DEFAULT_SEED;
-        else if (i_soft_reset)
-            lfsr <= i_seed;         // load runtime seed synchronously
-        else if (i_valid)
-            lfsr <= lfsr_next;      // advance sequence
-        // else: hold — no valid token, no reset
+        if (i_rst) begin
+            lfsr    <= DEFAULT_SEED;
+            o_valid <= 1'b0;
+        end else if (i_soft_reset) begin
+            lfsr    <= i_seed;      // load runtime seed synchronously
+            o_valid <= 1'b0;        // reseed, not a PRBS advance
+        end else if (i_valid) begin
+            lfsr    <= lfsr_next;   // advance sequence
+            o_valid <= 1'b1;
+        end else begin
+            o_valid <= 1'b0;        // hold — no valid token, no reset
+        end
     end
 
     assign o_data = lfsr;
