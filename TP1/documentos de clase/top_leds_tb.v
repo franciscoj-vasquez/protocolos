@@ -48,7 +48,7 @@ end
 endtask
 
 
-// --- Seleccion de test (comentar/descomentar) ---
+// --- Seleccion de test  ---
 // `define TEST1
 // `define TEST2
 // `define TEST3

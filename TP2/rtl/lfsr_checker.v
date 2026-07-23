@@ -36,6 +36,8 @@
 //   o_lock  : HIGH cuando el checker está bloqueado (secuencia verificada)
 // =============================================================================
 
+`timescale 1ns / 1ps
+
 module lfsr_checker #(
     parameter DATA_WIDTH       = 16,
     parameter LOCK_THRESHOLD   = 5,

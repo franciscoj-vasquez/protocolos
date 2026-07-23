@@ -21,9 +21,11 @@
 //   reset/seed load or a hold, since that data isn't a fresh sequence step.
 // =============================================================================
 
+`timescale 1ns / 1ps
+
 module lfsr_generator #(
     parameter DATA_WIDTH   = 16,
-    parameter DEFAULT_SEED = 16'hFFFF   // hard-wired seed for i_rst
+    parameter DEFAULT_SEED = 16'hFFFF   // for i_rst
 )(
     input                       i_clk,
     input                       i_rst,        // async reset  → DEFAULT_SEED

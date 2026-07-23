@@ -25,14 +25,14 @@ begin
 
     // Dejamos evolucionar el sistema para tener un estado de LEDs variable
     repeat($urandom_range(1,100)) @(posedge clock);
-    #1; // NBAs del ultimo flanco asentadas
+    #1; // NBAs del ultimo flanco
 
     // Guardamos o_led (debe ser independiente de sw[3])
     prev_o_led = o_led;
 
     // ---- Verificacion con sw[3] = 1 (azul) ----
     i_sw[3] = 1'b1;
-    #1; // la logica combinacional se actualiza
+    #1;
 
     if(o_led !== prev_o_led)
     begin
