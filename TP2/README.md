@@ -7,29 +7,38 @@ TP2/
 ├── primer_archivo.v
 ├── rtl/
 │   ├── lfsr_generator.v
-│   └── lfsr_checker.v
+│   ├── lfsr_checker.v
+│   └── fsm_style/                  # misma func., otro estilo de codificación
+│       ├── lfsr_generator.v
+│       └── lfsr_checker.v
 └── tb/
     ├── tb_lfsr_generator.v
-    └── tb_lfsr_system.v
+    ├── tb_lfsr_system.v
+    ├── channel_delay.v             # modelo de canal (delay de N ciclos)
+    └── tb_lfsr_system_channel.v
 ```
 
 ---
 
 ## Estado de verificación
 
-Ambos testbenches fueron compilados y simulados con **Icarus Verilog 12.0** (`iverilog -g2012` + `vvp`):
+Todos los testbenches fueron compilados y simulados con **Icarus Verilog 12.0** (`iverilog -g2012` + `vvp`):
 
 | Testbench | Tests | Resultado |
 |---|---|---|
 | `tb_lfsr_generator.v` | TEST 0a, 0b, 0c, 1, 2 (×5 seeds), 3, 4 | 15/15 PASS |
 | `tb_lfsr_system.v` | TEST 0, 1, 2, 3, 4 (×5 iter), 5 (×5 iter) | 12/12 PASS |
+| `tb_lfsr_system_channel.v` | TEST C0, C1 (×5 delays), C2, C3, C4 (×8 iter) | 11/11 PASS |
 
 Para reproducir:
 
 ```bash
 iverilog -g2012 -o sim_gen.vvp tb/tb_lfsr_generator.v rtl/lfsr_generator.v && vvp sim_gen.vvp
 iverilog -g2012 -o sim_sys.vvp tb/tb_lfsr_system.v rtl/lfsr_generator.v rtl/lfsr_checker.v && vvp sim_sys.vvp
+iverilog -g2012 -o sim_chan.vvp tb/tb_lfsr_system_channel.v tb/channel_delay.v rtl/lfsr_generator.v rtl/lfsr_checker.v && vvp sim_chan.vvp
 ```
+
+`rtl/fsm_style/` y `tb/channel_delay.v` + `tb/tb_lfsr_system_channel.v` son extensiones no pedidas por la consigna — ver sus propias secciones más abajo para el detalle de qué son y cómo se verificaron.
 
 La primera corrida de `tb_lfsr_system.v` encontró y corrigió una condición de carrera real en `send_valid`/`send_invalid` (ver sección de esa testbench) que hacía perder el último ciclo de cada ráfaga, impidiendo que el checker llegara a lockear.
 
@@ -90,6 +99,28 @@ La referencia interna (`lfsr_ref`) se inicializa en `0` — un valor que la secu
 
 ---
 
+## `rtl/fsm_style/` (extensión — no pedida por la consigna)
+
+Reescritura de `lfsr_generator.v` y `lfsr_checker.v` con el patrón de dos `always` separados: uno combinacional (`always @*`) con `case` para la lógica de próximo estado, y otro secuencial (`always @(posedge i_clk or posedge i_rst)`) que solo registra lo que decidió el combinacional. Mismo nombre de módulo y misma interfaz que los originales — pensado para poder recompilarse contra los testbenches existentes sin tocar ni una línea de esos testbenches. `rtl/lfsr_generator.v` y `rtl/lfsr_checker.v` (ya verificados) quedan intactos; esta es una versión paralela, no un reemplazo.
+
+**Por qué `i_rst` no entra al `case` combinacional:** es asíncrono, y para que eso sea real en hardware (no un reset sincrónico disfrazado) tiene que resolverse en la sensitivity list del propio `always` secuencial (`posedge i_clk or posedge i_rst`). El combinacional solo resuelve la prioridad `i_soft_reset` > `i_valid` > hold (generador) o el `case` sobre `state` (checker); `i_rst` gana por fuera de ese case, en el secuencial.
+
+**Defaults contra latches:** ambos combinacionales asignan valores de "hold" a todas sus señales `next_*` antes del `case`, y el `case` tiene además rama `default` explícita — doble cobertura para que ninguna señal quede sin definir en ningún camino del bloque.
+
+- Selector del generador: `ctrl_sel = {i_soft_reset, i_valid}` (`fsm_style/lfsr_generator.v:82`) — las señales de control encendidas/apagadas se usan directamente como entrada del `case` que arma `next_lfsr`/`next_o_valid`.
+- Selector del checker: `case (state)` (`fsm_style/lfsr_checker.v:112`) — encaja naturalmente porque el checker ya tenía una FSM de 2 estados explícita.
+
+**Verificación de equivalencia:** se recompilaron `tb_lfsr_generator.v` y `tb_lfsr_system.v`, **sin modificarlos**, apuntando a estos archivos en vez de a los originales:
+
+```bash
+iverilog -g2012 -o sim_gen_fsm.vvp tb/tb_lfsr_generator.v rtl/fsm_style/lfsr_generator.v && vvp sim_gen_fsm.vvp
+iverilog -g2012 -o sim_sys_fsm.vvp tb/tb_lfsr_system.v rtl/fsm_style/lfsr_generator.v rtl/fsm_style/lfsr_checker.v && vvp sim_sys_fsm.vvp
+```
+
+Resultado: mismos 27/27 PASS que las versiones originales. Adicionalmente, por fuera de estos testbenches (stress test exploratorio, no versionado), se compararon ambas versiones ciclo a ciclo durante 20 000 ciclos con `i_rst`/`i_soft_reset`/`i_valid` aleatorios y simultáneos — 0 diferencias, incluyendo (para el checker) el estado interno completo (`state`, `lfsr_ref`, `valid_cnt`, `invalid_cnt`), no solo `o_lock`.
+
+---
+
 ## `tb/tb_lfsr_generator.v`
 
 **Actividades 2 y 3** — Testbench del generador aislado.
@@ -134,3 +165,35 @@ Instancia ambos módulos RTL y los conecta. Incluye un mux de inyección de erro
 - **TEST 3**: condición frontera de unlock — patrón (2 inválidos + 1 válido) × 10 mientras locked; verifica que nunca desbloquea.
 - **TEST 4**: transiciones — patrón (5 válidos + 3 inválidos) × 5; verifica que siempre alterna entre LOCKED y UNLOCKED.
 - **TEST 5**: reset aleatorio del checker × 5; verifica que siempre vuelve a lockear tras cada reset.
+
+---
+
+## `tb/channel_delay.v` y `tb/tb_lfsr_system_channel.v` (extensión — no pedida por la consigna)
+
+Modelo de canal de comunicación insertado entre generador y checker, para simular latencia de transmisión (mayor o menor "distancia") en vez de la conexión directa `gen_o_valid`/`gen_o_data` → checker que usa `tb_lfsr_system.v`.
+
+**`channel_delay.v`:** shift register de `MAX_DELAY` etapas que desplaza **siempre**, ciclo a ciclo, sin importar el valor de `i_delay` — `i_delay` solo selecciona de qué etapa se lee, nunca detiene ni salta el desplazamiento. `data` y `valid` avanzan siempre juntos, etapa por etapa (mismo principio que `o_valid`/`o_data` en `lfsr_generator.v`, aplicado ahora a cada etapa del canal en vez de a un único flip-flop). `i_delay = 0` es un passthrough combinacional, equivalente a la conexión directa que usa `tb_lfsr_system.v`.
+
+Cambiar `i_delay` mientras hay datos en tránsito haría que la lectura "salte" a otra edad del buffer (dato repetido si N sube, salteado si N baja) — no es un bug del módulo, es lo que pasaría en la vida real si se cambiara la longitud de un cable en caliente. La responsabilidad de cambiar `i_delay` en un momento seguro es del testbench, no del módulo:
+
+- `set_channel_delay(n)` (`tb_lfsr_system_channel.v:169`): pulsa `i_rst` del canal junto con el cambio de `chan_delay`, para que arranque "vacío" en la nueva distancia — como reconectar el cable.
+- `randomize_channel_delay()` (`tb_lfsr_system_channel.v:183`): elige `n` con `$urandom_range(0, MAX_DELAY)` y llama a `set_channel_delay` — simula reconectar a una distancia aleatoria entre ráfagas.
+
+La inyección de errores (`inject_error`) se aplica **antes** del canal (`tx_data = inject_error ? ~gen_o_data : gen_o_data`, alimentando al canal): el canal transporta fielmente lo que se le entrega, sea el dato correcto o uno corrompido a propósito, igual que un canal real no "arregla" los bits que le llegan mal.
+
+**Drenaje generalizado:** con canal, el último dato de una ráfaga tarda 1 ciclo (registro propio del generador) + `chan_delay` ciclos (propagación por el canal) en llegar al checker. `send_valid`/`send_invalid` generalizan el drenaje fijo de `tb_lfsr_system.v` (un solo `@(posedge i_clk)`) a `repeat (chan_delay + 1) @(posedge i_clk)` — con `chan_delay = 0` coincide exactamente con el drenaje original, así que ambos testbenches concuerdan en ese caso límite.
+
+**Tests:**
+- **TEST C0**: `delay = 0` — regresión, debe comportarse igual que `tb_lfsr_system.v` sin canal.
+- **TEST C1**: lock a través de 5 distancias fijas (0, 4, 8, 12, 16 ciclos).
+- **TEST C2**: tráfico válido continuo con `delay = MAX_DELAY` (31, el máximo que entra en los 5 bits de `i_delay`) — no debe desbloquear en un período completo (65 535 ciclos).
+- **TEST C3**: fronteras de lock/unlock (mismos patrones que TEST 2/3 de `tb_lfsr_system.v`) con `delay = 7`.
+- **TEST C4**: 8 iteraciones de lock→unlock, cada una con una distancia aleatoria distinta entre ráfagas (vía `randomize_channel_delay`).
+
+Resultado: 11/11 PASS (C0=1, C1=5 individuales + 1 agregado, C2=1, C3=2, C4=1 agregado sobre 8 iteraciones — mismo criterio de conteo que las tablas de arriba: líneas que contienen la palabra PASS en una corrida limpia). Se verificó además, por fuera de este testbench (probe exploratorio, no versionado), que el canal reproduce dato y valid bit-exacto con el retardo esperado: 2447 muestras comparadas contra una cola de referencia para delay ∈ {0, 1, 5, 20, 31}, 0 mismatches (31 = `MAX_DELAY`, el límite real del canal).
+
+Para reproducir:
+
+```bash
+iverilog -g2012 -o sim_chan.vvp tb/tb_lfsr_system_channel.v tb/channel_delay.v rtl/lfsr_generator.v rtl/lfsr_checker.v && vvp sim_chan.vvp
+```

@@ -284,7 +284,7 @@ module tb_lfsr_system;
         reset_generator();
         reset_checker();
 
-        send_valid(1);       // ciclo de resync (1er ciclo en UNLOCKED)
+        send_valid(1);       // ciclo de resync (no le suma a la cuenta de aciertos)
         send_valid(4);       // 4 checks en UNLOCKED: valid_cnt = 1, 2, 3, 4
         send_invalid(1);     // mismatch → valid_cnt = 0, sigue en UNLOCKED
 

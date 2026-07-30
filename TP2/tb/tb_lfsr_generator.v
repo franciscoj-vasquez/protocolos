@@ -10,13 +10,6 @@
 //   · valid aleatorio     : proceso que randomiza rand_valid en cada ciclo;
 //                           i_valid es un wire que selecciona entre forced_valid
 //
-//
-// o_valid — señal que debe viajar siempre junto a o_data (registrada, no un
-//   simple alias combinacional de i_valid): el DUT la expone como salida y
-//   este testbench la verifica en TEST 0a/0b/0c (debe bajar tras cualquier
-//   carga de seed, incluso si i_valid estaba asertado a la vez), TEST 3
-//   (gating) y TEST 4 (comparación ciclo a ciclo contra el i_valid muestreado).
-//
 // Actividad 3 — tests:
 //   · TEST 0a: i_rst       → o_data == DEFAULT_SEED, o_valid == 0
 //   · TEST 0b: i_soft_reset → o_data == i_seed, o_valid == 0
@@ -58,7 +51,7 @@ module tb_lfsr_generator;
     wire                   o_valid;
 
     // =========================================================================
-    // Control de i_valid — separado en dos drivers para evitar conflicto:
+    // Control de i_valid
     //   forced_valid : controlado por las secuencias de test (initial block)
     //   rand_valid   : randomizado por el proceso siempre-activo (always block)
     //   i_valid      : wire que selecciona entre ambos según rand_valid_en
@@ -67,7 +60,7 @@ module tb_lfsr_generator;
     reg  rand_valid;
     reg  rand_valid_en;
 
-    wire i_valid = rand_valid_en ? rand_valid : forced_valid; // Compatibilizar Actividad 2 y test de Actividad 3
+    wire i_valid = rand_valid_en ? rand_valid : forced_valid; // mux para test con valid aleatorio o fijos
 
     // =========================================================================
     // Instancia del DUT
@@ -130,7 +123,7 @@ module tb_lfsr_generator;
     endfunction
 
     // ========================================================================= Actividad 2
-    // Task: task_set_seed — actualiza i_seed en tiempo de simulación
+    // Task: task_set_seed — actualiza i_seed
     // =========================================================================
     task task_set_seed;
         input [DATA_WIDTH-1:0] new_seed;
@@ -150,7 +143,7 @@ module tb_lfsr_generator;
             $display("    [task_async_reset] i_rst activo por %0d ns", rand_ns);
             i_rst = 1'b1;
             #(rand_ns);
-            @(negedge i_clk);
+            @(negedge i_clk); // evitar race condition
             i_rst = 1'b0;
             @(posedge i_clk);
             #1;
@@ -168,7 +161,7 @@ module tb_lfsr_generator;
                      rand_ns, i_seed);
             i_soft_reset = 1'b1;
             #(rand_ns);
-            @(negedge i_clk);
+            @(negedge i_clk); // evitar race condition
             i_soft_reset = 1'b0;
             @(posedge i_clk);
             #1;
@@ -396,9 +389,7 @@ module tb_lfsr_generator;
                 fail_flag = 1;
             end
 
-            // o_valid debe viajar junto con o_data: en este tramo i_rst e
-            // i_soft_reset están en 0, así que o_valid debe calcar exactamente
-            // el i_valid muestreado en el flanco que acaba de ocurrir.
+            // o_valid debe viajar junto con o_data
             if (o_valid !== sampled_valid) begin
                 $display("  FAIL: ciclo %0d — o_valid=%0b, esperado=%0b (debe viajar con o_data)",
                          idx, o_valid, sampled_valid);
