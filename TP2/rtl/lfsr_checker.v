@@ -1,27 +1,21 @@
 // =============================================================================
 // Module  : lfsr_checker
 //
-// Funcionamiento:
-//   1. UNLOCKED : compara cada dato con el valor predicho (lfsr_ref_next).
-//                 Acierto  → acumula valid_cnt; lock al alcanzar LOCK_THRESHOLD.
-//                 Error    → no hay estado especial para esto: simplemente no
-//                             hay (todavía) con qué comparar, así que i_data se
-//                             toma como nueva referencia y valid_cnt se reinicia.
-//                             Esto cubre tanto la falta de sincronización
-//                             inicial como cualquier desincronización futura,
-//                             sin gastar un estado ni un ciclo aparte.
-//   2. LOCKED   : acumula errores consecutivos → unlock al alcanzar
-//                 UNLOCK_THRESHOLD. Un acierto resetea el contador de errores.
-//                 Al desbloquear, lfsr_ref se fuerza al centinela 0 (ver abajo)
-//                 en vez de seguir prediciendo, para no arrastrar una
-//                 referencia contaminada por los datos inválidos recién vistos.
-//
-// Ports:
-//   i_clk   : clock del sistema
-//   i_rst   : reset asíncrono (activo alto) → vuelve a UNLOCKED
-//   i_valid : habilita la evaluación (debe coincidir con el del generador)
-//   i_data  : salida del generador LFSR
-//   o_lock  : HIGH cuando el checker está bloqueado (secuencia verificada)
+// Behavior:
+//   1. UNLOCKED : compares each data word against the predicted value
+//                 (lfsr_ref_next).
+//                 Match    →  accumulates valid_cnt; locks at LOCK_THRESHOLD.
+//                 Mismatch →  i_data is taken as the new reference and
+//                             valid_cnt is reset.
+//   2. LOCKED   : accumulates consecutive errors → unlocks at
+//                 UNLOCK_THRESHOLD. A match resets the error counter.
+//                 On a transient error, lfsr_ref keeps predicting the next
+//                 value from the internal reference (lfsr_ref) so the
+//                 sequence isn't lost, but once UNLOCK_THRESHOLD errors
+//                 accumulate and it unlocks, lfsr_ref is forced back to the
+//                 sentinel value 0 (see below) instead of continuing to
+//                 predict, so it doesn't carry forward a reference
+//                 contaminated by the invalid data just seen.
 // =============================================================================
 
 `timescale 1ns / 1ps
@@ -39,18 +33,18 @@ module lfsr_checker #(
 );
 
     // -------------------------------------------------------------------------
-    // Estados internos
+    // Internal states
     // -------------------------------------------------------------------------
     localparam ST_UNLOCKED = 1'b0;
     localparam ST_LOCKED   = 1'b1;
 
     reg                  state;
-    reg [DATA_WIDTH-1:0] lfsr_ref;       // referencia interna (un paso atrás)
-    reg [3:0]            valid_cnt;      // aciertos consecutivos
-    reg [3:0]            invalid_cnt;    // errores consecutivos
+    reg [DATA_WIDTH-1:0] lfsr_ref;       // internal reference (one step behind)
+    reg [3:0]            valid_cnt;      // consecutive matches
+    reg [3:0]            invalid_cnt;    // consecutive errors
 
     // -------------------------------------------------------------------------
-    // Función de paso del LFSR — misma topología y polinomio que el generador
+    // LFSR step function — same topology and polynomial as the generator
     // -------------------------------------------------------------------------
     function [DATA_WIDTH-1:0] lfsr_step;
         input [DATA_WIDTH-1:0] s;
@@ -76,16 +70,16 @@ module lfsr_checker #(
         end
     endfunction
 
-    // Próximo valor esperado (combinacional)
+    // Next expected value (combinational)
     wire [DATA_WIDTH-1:0] lfsr_ref_next = lfsr_step(lfsr_ref);
 
     // -------------------------------------------------------------------------
-    // Máquina de estados secuencial
+    // Sequential state machine
     // -------------------------------------------------------------------------
     always @(posedge i_clk or posedge i_rst) begin
         if (i_rst) begin
             state       <= ST_UNLOCKED;
-            lfsr_ref    <= {DATA_WIDTH{1'b0}};   // la primer comparacion se errara
+            lfsr_ref    <= {DATA_WIDTH{1'b0}};   // forces the first comparison to fail
             valid_cnt   <= 4'd0;
             invalid_cnt <= 4'd0;
             o_lock      <= 1'b0;
@@ -93,13 +87,13 @@ module lfsr_checker #(
         end else if (i_valid) begin
             if (state == ST_UNLOCKED) begin
                 // ---------------------------------------------------------------
-                // UNLOCKED: compara i_data con el próximo valor predicho.
-                //   Acierto → acumula valid_cnt; lock al alcanzar LOCK_THRESHOLD.
-                //   Error   → se toma i_data como nueva referencia
-                //             y se reinicia valid_cnt.
+                // UNLOCKED: compares i_data against the predicted next value.
+                //   Match    → accumulates valid_cnt; locks at LOCK_THRESHOLD.
+                //   Mismatch → i_data is taken as the new reference and
+                //              valid_cnt is reset.
                 // ---------------------------------------------------------------
                 if (i_data == lfsr_ref_next) begin
-                    lfsr_ref <= lfsr_ref_next; // o bien lfsr_ref <= i_data 
+                    lfsr_ref <= lfsr_ref_next; // equivalently lfsr_ref <= i_data
                     if (valid_cnt == LOCK_THRESHOLD - 1) begin
                         o_lock    <= 1'b1;
                         valid_cnt <= 4'd0;
@@ -113,21 +107,21 @@ module lfsr_checker #(
 
             end else begin // ST_LOCKED
                 // ---------------------------------------------------------------
-                // LOCKED: compara i_data con el próximo valor predicho.
-                //   Acierto → resetea invalid_cnt.
-                //   Error   → acumula invalid_cnt hasta desbloquear; al
-                //             desbloquear, lfsr_ref vuelve al centinela.
+                // LOCKED: compares i_data against the predicted next value.
+                //   Match    → resets invalid_cnt.
+                //   Mismatch → accumulates invalid_cnt until it unlocks; upon
+                //              unlocking, lfsr_ref goes back to the sentinel.
                 // ---------------------------------------------------------------
                 if (i_data == lfsr_ref_next) begin
-                    lfsr_ref    <= lfsr_ref_next; // o bien lfsr_ref <= i_data
+                    lfsr_ref    <= lfsr_ref_next; // equivalently lfsr_ref <= i_data
                     invalid_cnt <= 4'd0;
                 end else if (invalid_cnt == UNLOCK_THRESHOLD - 1) begin
                     o_lock      <= 1'b0;
                     invalid_cnt <= 4'd0;
                     state       <= ST_UNLOCKED;
-                    lfsr_ref    <= {DATA_WIDTH{1'b0}};   // centinela, igual que en el reset
+                    lfsr_ref    <= {DATA_WIDTH{1'b0}};   // sentinel, same as on reset
                 end else begin
-                    lfsr_ref    <= lfsr_ref_next;        // sigue prediciendo pese al error transitorio
+                    lfsr_ref    <= lfsr_ref_next;        // keeps predicting despite the transient error
                     invalid_cnt <= invalid_cnt + 4'd1;
                 end
             end

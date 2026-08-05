@@ -1,10 +1,10 @@
 // =============================================================================
-// Module  : lfsr_generator  (variante FSM style)
-// Purpose : Misma funcionalidad que rtl/lfsr_generator.v (16-bit Galois LFSR),
-//           reescrita con el patrón de dos always separados: uno combinacional
-//           (always @*) para la lógica de próximo estado, con case en vez de
-//           if/else if, y otro secuencial (always @(posedge clk)) que solo
-//           registra lo que decidió el combinacional.
+// Module  : lfsr_generator  (FSM style variant)
+// Purpose : Same functionality as rtl/lfsr_generator.v (16-bit Galois LFSR),
+//           rewritten with the two-separate-always pattern: one combinational
+//           (always @*) block for the next-state logic, using a case instead
+//           of if/else if, and one sequential (always @(posedge clk)) block
+//           that only registers what the combinational block decided.
 //
 // =============================================================================
 
@@ -26,8 +26,8 @@ module lfsr_generator #(
     reg [DATA_WIDTH-1:0] lfsr;
 
     // -------------------------------------------------------------------------
-    // Próximo valor del LFSR si i_valid gana este ciclo (topología Galois,
-    // idéntica a la versión original)
+    // Next LFSR value if i_valid wins this cycle (Galois topology, identical
+    // to the original version)
     // -------------------------------------------------------------------------
     wire feedback = lfsr[DATA_WIDTH-1]; //msb
 
@@ -51,8 +51,8 @@ module lfsr_generator #(
     assign lfsr_next[15] = lfsr[14];
 
     // -------------------------------------------------------------------------
-    // Combinacional: decide next_lfsr / next_o_valid.
-    // Selector = señales de control (i_soft_reset, i_valid).
+    // Combinational: decides next_lfsr / next_o_valid.
+    // Selector = control signals (i_soft_reset, i_valid).
     // -------------------------------------------------------------------------
     reg [DATA_WIDTH-1:0] next_lfsr;
     reg                  next_o_valid;
@@ -60,27 +60,28 @@ module lfsr_generator #(
     wire [1:0] ctrl_sel = {i_soft_reset, i_valid};
 
     always @(*) begin
-        // Defaults: hold (cubre {i_soft_reset,i_valid} == 2'b00 y previene
-        // patron default first
+        // Defaults: hold (covers {i_soft_reset,i_valid} == 2'b00 and guards
+        // against latch inference)
         next_lfsr    = lfsr;
         next_o_valid = 1'b0;
 
         case (ctrl_sel)
-            2'b10, 2'b11: begin   // i_soft_reset=1 (gana sin importar i_valid)
+            2'b10, 2'b11: begin   // i_soft_reset=1 (wins regardless of i_valid)
                 next_lfsr    = i_seed;
-                next_o_valid = 1'b0;   // reseed, no es avance PRBS
+                next_o_valid = 1'b0;   // reseed, not a PRBS advance
             end
-            2'b01: begin           // solo i_valid
+            2'b01: begin           // i_valid only
                 next_lfsr    = lfsr_next;
                 next_o_valid = 1'b1;
             end
-            default: ;              // 2'b00 → se queda con el hold de arriba
+            default: ;              // 2'b00 → keeps the hold defaults above
         endcase
     end
 
     // -------------------------------------------------------------------------
-    // Secuencial: i_rst se resuelve primero (async, fuera del combinacional);
-    // si no hay reset, registra lo que decidió el combinacional.
+    // Sequential: i_rst is resolved first (async, outside the combinational
+    // block); if there is no reset, it registers what the combinational
+    // block decided.
     // -------------------------------------------------------------------------
     always @(posedge i_clk or posedge i_rst) begin
         if (i_rst) begin

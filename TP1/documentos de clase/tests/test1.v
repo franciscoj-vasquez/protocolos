@@ -29,6 +29,14 @@ begin
     //----> Esperamos un momento random (1us = 1000 * timescale 1ns)
     #($urandom_range(1,5) * 1000);
 
+    //----> Sincronizamos con negedge antes de deshabilitar: como el delay
+    //      anterior es siempre un múltiplo exacto del período de clock,
+    //      cae justo sobre un posedge, lo que compite con el
+    //      always @(posedge clock) del contador en el mismo flanco (misma
+    //      carrera que send_valid/send_invalid en TP2). Esperar el negedge
+    //      deja el cambio asentado con margen antes del próximo posedge.
+    @(negedge clock);
+
     //----> Deshabilitamos y guardamos el estado actual
     i_sw[0]    = 'd0  ;
     prev_o_led = o_led;

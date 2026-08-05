@@ -143,6 +143,8 @@ Todos los tests usan `force`/`release` sobre señales internas (por ejemplo, for
 
 Cada test finaliza con un mensaje `$display` indicando `PASS` o `FAIL`, lo que permite verificar rápidamente el resultado de cada corrida en la consola del simulador.
 
+**Bug real encontrado y corregido en TEST1 (verificación cruzada con Icarus Verilog):** al recorrer este testbench con Icarus Verilog (además de Vivado, único simulador documentado originalmente para TP1), `TEST1` fallaba de forma consistente. Causa: el test deshabilita el contador (`i_sw[0] = 0`) inmediatamente después de esperar `$urandom_range(1,5) * 1000` nanosegundos — un múltiplo exacto del período de clock (10 ns) —, por lo que esa espera termina siempre justo sobre un flanco de subida. Eso genera una carrera entre el testbench (bajando `i_sw[0]`) y el `always @(posedge clock)` del contador muestreando `i_enable` en ese mismo flanco — la misma clase de bug ya encontrada y corregida en `send_valid`/`send_invalid` de TP2 (sección "TP2", más abajo). Vivado resuelve esa carrera de forma que no se manifiesta; Icarus la resuelve al revés, dejando que el contador incremente/shiftee un ciclo de más antes de congelarse, lo que dispara el `FAIL`. Se corrigió agregando `@(negedge clock)` antes de bajar `i_sw[0]`, el mismo patrón ya validado en TP2 — con el fix, `TEST1` pasa de forma consistente en ambos simuladores. Los TEST2–TEST6 no presentan el mismo patrón (esperan flancos con `repeat(N) @(posedge clock)` sin un cambio de señal inmediatamente después que dependa de ese flanco puntual) y se verificaron estables en múltiples corridas con Icarus.
+
 ![Simulación de comportamiento de TEST3 en Vivado](TP1/capturas/tp1_sim_test3.png)
 
 *Figura 1. Simulación de comportamiento (Vivado, TEST3) mostrando `o_led`/`o_led_b`/`o_led_g` transicionando junto con `sel` (límite seleccionado) y `expected_period` (0x11→0x21, es decir 17→33 ciclos al pasar de `limit_0` a `limit_1`). La consola confirma `TEST3 PASSED`.*
@@ -303,7 +305,7 @@ localparam ST_LOCKED   = 1'b1;
 ```verilog
 if (i_rst) begin
     state       <= ST_UNLOCKED;
-    lfsr_ref    <= {DATA_WIDTH{1'b0}};   // la primer comparacion se errara
+    lfsr_ref    <= {DATA_WIDTH{1'b0}};   // forces the first comparison to fail
     valid_cnt   <= 4'd0;
     invalid_cnt <= 4'd0;
     o_lock      <= 1'b0;
@@ -348,45 +350,95 @@ Tests implementados:
 | **3** | Con `i_valid = 0` durante 50 ciclos, la salida no avanza y `o_valid` permanece en 0. |
 | **4** | Valid intermitente aleatorio durante 3000 ciclos, comparado ciclo a ciclo contra un modelo de referencia (`lfsr_step`) que solo avanza cuando el `i_valid` muestreado fue 1; también verifica que `o_valid` coincide con el `i_valid` muestreado un ciclo antes. |
 
-**`tb/tb_lfsr_system.v` (Actividad 5)** — Instancia generador + checker conectados entre sí (`u_chk.i_valid` conectado a `gen_o_valid`, no al `i_valid` del testbench, para que el par valid/dato viaje completo entre los dos módulos). Incluye:
+**`tb/channel_delay.v` + `tb/tb_lfsr_system_channel.v` (Actividad 5)** — Testbench del sistema completo: generador → canal → checker (`u_chk.i_valid` conectado a la salida del canal, no al `i_valid` del testbench, para que el par valid/dato viaje completo desde el generador hasta el checker). El canal (`channel_delay.v`) es un shift register de latencia configurable (`i_delay`, 0 a 31 ciclos) que modela distintas "distancias" de transmisión entre generador y checker: con `delay=0` es un passthrough combinacional puro, equivalente a conectar ambos módulos directo — esa es la instancia mínima que satisface la Actividad 5 — y con `delay>0` se extiende más allá de lo pedido por la consigna.
 
-- Un mux de inyección de errores (`inject_error`) que fuerza datos incorrectos al checker sin alterar el generador.
-- Un monitor `always @(o_lock)` que imprime un mensaje cada vez que cambia el estado de lock, indicando valor anterior y nuevo — tal como pide la consigna.
-- Tasks `reset_generator`/`reset_checker` (reset aleatorio de cada módulo), `send_valid(n)`/`send_invalid(n)` (envían N ciclos de datos correctos/erróneos) y `lock_checker` (lleva al checker a estado `LOCKED`).
+El canal recibe tres señales de control desde el testbench:
+
+- `i_delay`: la latencia vigente. Cambiarla mientras hay datos en tránsito haría que la lectura "salte" a otra edad del buffer, así que el testbench siempre pulsa un reset del canal junto con el cambio de delay, para que arranque "vacío" en la nueva distancia (como reconectar el cable).
+- `i_valid`: gateado aleatoriamente 50/50 en cada ciclo (mismo mecanismo `rand_valid` que en `tb_lfsr_generator.v`) en vez de mantenerse fijo en alto durante toda una ráfaga — las tasks `send_valid(n)`/`send_invalid(n)` tiran la moneda ciclo a ciclo hasta entregar exactamente `n` datos, así que el checker recibe siempre la misma cantidad de datos, solo que repartidos sobre una cantidad aleatoria de ciclos de reloj en vez de `n` ciclos consecutivos.
+- `i_inject_error`: fuerza un dato incorrecto al checker sin alterar el generador.
+
+**Decisión de diseño — corrupción de un bit aleatorio, no de la palabra entera:** este último punto se modificó deliberadamente a partir de una sugerencia recibida en un encuentro de la cátedra, luego de mencionar que la implementación vigente en ese momento invertía la palabra completa (`~i_data`). La versión final invierte, en cambio, un **único bit elegido al azar** en cada ciclo de inyección: un solo bit volteado es mucho más representativo de un error real de transmisión (bit-flip por ruido en el canal) que invertir el dato entero de una vez. La propiedad que necesitan los tests de frontera —que con `i_inject_error=1` el checker vea siempre un dato distinto al esperado— se mantiene igual que antes: invertir un solo bit de un valor de `DATA_WIDTH` bits nunca puede reproducir ese mismo valor, sea cual sea el bit elegido.
+
+Además, un monitor `always @(o_lock)` imprime un mensaje cada vez que cambia el estado de lock, indicando valor anterior y nuevo — tal como pide la consigna. Tasks auxiliares: `reset_generator`/`reset_checker` (reset aleatorio de cada módulo), `send_valid(n)`/`send_invalid(n)` (descriptas arriba) y `lock_checker` (lleva al checker a estado `LOCKED`).
+
+**Organización de los tests:** a diferencia de `tb_lfsr_generator.v` (una única secuencia principal con todos los tests en cadena), `tb_lfsr_system_channel.v` solo contiene la infraestructura compartida (instancias de los tres módulos, clock, monitor de `o_lock`, tasks de reset/envío); cada uno de los 7 tests vive en su propio archivo bajo `tb/tests/`, nombrado según lo que verifica (por ejemplo `test_chained_transitions.v` para C5), envuelto como una task (`test_C0`..`test_C6`) e incorporado vía `` `include ``. Se usó `` `include `` — y no una compilación separada por archivo — porque cada task necesita acceso directo a las señales del módulo contenedor (instancias de los DUT, registros de control); esas señales no existirían si cada test fuera su propio módulo aislado. Cuál test correr se resuelve en tiempo de ejecución con un `case` sobre un plusarg (`+TEST=<nombre>` al invocar `vvp`): sin plusarg, o con `+TEST=ALL`, corre la suite completa C0..C6 en orden — el comportamiento original de este testbench —, mientras que por ejemplo `+TEST=C3` corre únicamente ese test. Esto evita la recompilación por test que exige el patrón `` `define TESTn ``/`` `include `` usado en TP1 (sección 3): acá se compila una sola vez y se elige el test a correr (o todos) al invocar `vvp`, a costa de necesitar el flag `-I tb` al compilar para que Icarus resuelva los `` `include `` relativos a la carpeta `tb/` (por defecto no los busca ahí).
 
 Tests implementados:
 
-| Test | Qué verifica |
-|---|---|
-| **0** | Tras `i_soft_reset` del generador con seed `0xCAFE`, el checker logra lockear desde la nueva seed. |
-| **1** | Tráfico válido continuo durante un período completo (65535 ciclos): el checker lockea y nunca se desbloquea. |
-| **2** | Frontera de lock: 4 datos válidos + 1 inválido → nunca debe lockear. |
-| **3** | Frontera de unlock: ya lockeado, patrón (2 inválidos + 1 válido) × 10 → nunca debe desbloquear. |
-| **4** | Transiciones: patrón (5 válidos + 3 inválidos) × 5 → siempre debe alternar entre `LOCKED` y `UNLOCKED`. |
-| **5** | Reset aleatorio del checker × 5 → siempre vuelve a lockear después de cada reset. |
+| Test | Archivo | Qué verifica |
+|---|---|---|
+| **C0** | `test_direct_connection.v` | Con `delay=0`: tras `i_soft_reset` del generador con seed `0xCAFE`, el checker logra lockear desde la nueva seed — instancia mínima que satisface la Actividad 5. |
+| **C1** | `test_fixed_distances.v` | Lock a través de 5 distancias fijas de canal (0, 4, 8, 12, 16 ciclos). |
+| **C2** | `test_max_delay_traffic.v` | Tráfico válido continuo con `delay=31` (latencia máxima soportada) durante un período completo (65535 datos válidos): el checker lockea y nunca se desbloquea. |
+| **C3** | `test_lock_unlock_boundaries.v` | Fronteras de lock/unlock con `delay=7`: 4 datos válidos + 1 inválido → nunca lockea; ya lockeado, (2 inválidos + 1 válido) × 10 → nunca desbloquea. |
+| **C4** | `test_random_distance_transitions.v` | 8 iteraciones de lock→unlock, cada una con una distancia aleatoria distinta entre ráfagas, reseteando generador y checker antes de cada intento. |
+| **C5** | `test_chained_transitions.v` | Transición encadenada: patrón (5 válidos + 3 inválidos) × 5, **sin** resetear generador/checker entre iteraciones, y con la distancia del canal **re-randomizada antes de cada iteración** — verifica que siempre alterna entre `LOCKED` y `UNLOCKED` bajo tráfico continuo y distancia variable, no solo tras un reset limpio a una latencia fija. |
+| **C6** | `test_reset_mid_traffic.v` | Reset aleatorio del checker **en medio de tráfico** (no desde un estado limpio) × 5 — siempre vuelve a lockear. |
 
-![Simulación de comportamiento de TEST4 en Vivado](TP2/capturas/tp2_sim_test4.png)
+**Decisión de diseño — distancia aleatoria por iteración en C5:** la primera versión de este test fijaba la distancia del canal en un valor arbitrario (`delay=7`) durante las 5 iteraciones, para aislar la única variable que C5 existe para probar — el encadenamiento sin reset — de la latencia del canal, que C4 ya cubre (aunque ahí sí con reset en cada intento). Al revisar el testbench se decidió randomizar la distancia en cada iteración en lugar de dejarla fija: `send_valid`/`send_invalid` ya garantizan que el canal queda drenado (sin datos en tránsito) antes de retornar, así que cambiar `i_delay` entre ráfagas es seguro, y como `set_channel_delay` solo resetea el canal (`chan_rst`) — nunca `gen_rst` ni `chk_rst` — la propiedad que el test busca demostrar (que generador y checker mantienen su estado interno sin interrupción) queda intacta. El resultado es una cobertura estrictamente mayor sin diluir el propósito original del test.
 
-*Figura 4. Simulación de comportamiento (Vivado, TEST4 de `tb_lfsr_system.v`) mostrando `o_lock` alternando entre `LOCKED` y `UNLOCKED` en cada una de las 5 iteraciones del patrón (5 válidos + 3 inválidos), junto con `gen_o_valid` y `chk_i_data`. La consola confirma que la simulación completa (TEST 0 a 5) terminó en PASS.*
+![Simulación de comportamiento en Vivado](TP2/capturas/tp2_sim_test4.png)
 
-**Bug real encontrado y corregido durante la verificación:** la primera corrida de `tb_lfsr_system.v` detectó una condición de carrera en `send_valid`/`send_invalid`: la desaserción de `i_valid` competía con los `always @(posedge i_clk)` del generador y el checker en el mismo flanco, y el simulador resolvía esa carrera a favor del testbench, perdiendo el último ciclo de cada ráfaga de datos e impidiendo que el checker llegara a lockear. Se corrigió esperando el `negedge` del clock antes de desasertar `i_valid`. Al introducir después `o_valid` como señal registrada, apareció una variante del mismo problema (`gen_o_valid` queda un ciclo detrás de `i_valid`), resuelta agregando un flanco de drenaje adicional al final de cada ráfaga.
+*Figura 4. Consola de Vivado al finalizar la simulación del sistema, mostrando la última iteración (`iter 4`) del test de reset aleatorio del checker en medio de tráfico — el mismo patrón que hoy corre como TEST C6 en `tb_lfsr_system_channel.v` — con el mensaje final `PASS: todos los re-locks exitosos tras reset random` y el cierre de la simulación completa. Captura tomada sobre `tb_lfsr_system.v` (la versión sin canal, hoy retirada); la lógica del test se trasladó sin cambios a TEST C6.*
+
+**Bug real encontrado y corregido durante la verificación:** la primera corrida del testbench de sistema detectó una condición de carrera en `send_valid`/`send_invalid`: la desaserción de `i_valid` competía con los `always @(posedge i_clk)` del generador y el checker en el mismo flanco, y el simulador resolvía esa carrera a favor del testbench, perdiendo el último ciclo de cada ráfaga de datos e impidiendo que el checker llegara a lockear. Se corrigió esperando el `negedge` del clock antes de desasertar `i_valid`. Al introducir después `o_valid` como señal registrada, apareció una variante del mismo problema (`gen_o_valid` queda un ciclo detrás de `i_valid`), resuelta agregando un flanco de drenaje adicional al final de cada ráfaga — que con canal se generaliza a `chan_delay + 1` ciclos, para darle tiempo también a la propagación por el canal.
 
 ### 5. Extensiones
 
 Estas modificaciones surgieron a partir de comentarios realizados en los encuentros de la cátedra, orientados a lograr un código de mayor calidad, alineado con estándares de diseño y con mejores técnicas de verificación:
 
 - **`rtl/fsm_style/`:** una reescritura del generador y el checker con el patrón de dos `always` separados (uno combinacional con `case` para el próximo estado, otro secuencial que solo registra), verificada como equivalente ciclo a ciclo (incluyendo estado interno completo) frente a las versiones originales, sin modificar ninguno de los testbenches existentes.
-- **`tb/channel_delay.v` + `tb/tb_lfsr_system_channel.v`:** un modelo de canal de comunicación con latencia configurable (0 a 31 ciclos) entre generador y checker, para simular distintas "distancias" de transmisión, con tests de lock a distintas distancias fijas y aleatorias.
+- **Latencia de canal configurable:** más allá del caso mínimo (`delay=0`) que satisface la Actividad 5, el modelo de canal soporta latencias de hasta 31 ciclos, ejercitadas en los tests C1 a C6 descriptos en la sección anterior (distancias fijas, tráfico continuo, fronteras de lock/unlock y transiciones bajo latencia, y reset del checker en medio de tráfico con el canal activo).
+- **Tests desacoplados en archivos independientes, con dispatch por plusarg:** los 7 tests de `tb_lfsr_system_channel.v` (C0–C6), originalmente todos en la secuencia principal de un único archivo, se separaron en `tb/tests/`, un archivo por test nombrado según lo que verifica e incluido como task vía `` `include ``. La selección de qué test(s) correr pasó a resolverse en tiempo de ejecución (`case` sobre `+TEST=<nombre>`) en vez de requerir una recompilación por test como en TP1 — permite aislar y depurar un test puntual (por ejemplo `vvp sim_chan.vvp +TEST=C5`) sin recompilar ni tocar los demás.
+
+**Comparación de utilización de recursos — original vs. `fsm_style`:** para confirmar empíricamente la equivalencia entre ambos estilos de código, se sintetizó cada módulo por separado (fuera de contexto, `synth_design -top <módulo> -part xc7a35ticsg324-1L`, Vivado 2023.1) en sus dos versiones. Resultado: **utilización idéntica, celda por celda**, entre el original y `fsm_style` — las tablas siguientes no distinguen entre versiones porque no hay ninguna diferencia que mostrar.
+
+| Módulo | Slice LUTs | Slice Registers |
+|---|---|---|
+| `lfsr_generator` | 11 | 17 |
+| `lfsr_checker` | 33 | 25 |
+
+Primitivas de `lfsr_generator`:
+
+| Primitiva | Cantidad | Categoría |
+|---|---|---|
+| IBUF | 20 | IO |
+| OBUF | 17 | IO |
+| FDPE | 16 | Flop & Latch |
+| LUT3 | 13 | LUT |
+| LUT4 | 3 | LUT |
+| LUT2 | 2 | LUT |
+| FDCE | 1 | Flop & Latch |
+| BUFG | 1 | Clock |
+
+Primitivas de `lfsr_checker`:
+
+| Primitiva | Cantidad | Categoría |
+|---|---|---|
+| FDCE | 25 | Flop & Latch |
+| LUT5 | 22 | LUT |
+| IBUF | 19 | IO |
+| LUT6 | 6 | LUT |
+| LUT4 | 6 | LUT |
+| LUT2 | 3 | LUT |
+| LUT3 | 2 | LUT |
+| CARRY4 | 2 | CarryLogic |
+| OBUF | 1 | IO |
+| BUFG | 1 | Clock |
+
+*Los `IBUF`/`OBUF`/`BUFG` son artefacto de sintetizar cada módulo aislado, fuera de contexto, como si fuera el diseño top — cada puerto se vuelve un pin físico con su propio buffer, y el clock necesita su propio buffer global. Lo relevante para la comparación de estilos de RTL son los recursos lógicos (`LUTs` y `Registers`), que coinciden exactamente entre ambas versiones.*
+
+Este resultado confirma lo esperable: un sintetizador optimiza en base a la función lógica descripta (la tabla de verdad / la máquina de estados), no en base al estilo con el que se escribió el RTL. Como ambas versiones ya estaban verificadas como equivalentes ciclo a ciclo —incluyendo el estado interno completo del checker—, describían exactamente la misma función, y Vivado llegó de forma independiente al mismo netlist óptimo para las dos. La reescritura en `fsm_style/` mejora la legibilidad y el apego a un patrón de codificación más estándar (combinacional separado de secuencial), pero no tiene costo ni beneficio en área.
 
 ### 6. Resultados de verificación
 
 | Testbench | Tests | Resultado |
 |---|---|---|
 | `tb_lfsr_generator.v` | 0a, 0b, 0c, 1, 2 (×5 seeds), 3, 4 | 15/15 PASS |
-| `tb_lfsr_system.v` | 0, 1, 2, 3, 4 (×5 iter), 5 (×5 iter) | 12/12 PASS |
-| `tb_lfsr_system_channel.v` (extensión) | C0, C1 (×5 delays), C2, C3, C4 (×8 iter) | 11/11 PASS |
+| `tb_lfsr_system_channel.v` | C0, C1 (×5 delays), C2, C3, C4 (×8 iter), C5, C6 (×5 iter) | 20/20 PASS |
 
-Todas las simulaciones se verificaron mediante simulación funcional de los testbenches, sin depender de los IP cores propietarios.
+**Total: 35/35 PASS.** Todas las simulaciones se verificaron mediante simulación funcional de los testbenches, sin depender de los IP cores propietarios.
 
 ### 7. Conclusiones del TP2
 

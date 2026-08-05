@@ -2,26 +2,26 @@
 // Testbench : tb_lfsr_generator
 // DUT       : lfsr_generator
 //
-// Actividad 2 — infraestructura:
-//   · Clock 10 MHz (periodo = 100 ns)
-//   · task_set_seed       : cambia i_seed en runtime
-//   · task_async_reset    : activa i_rst por tiempo random en [1us, 250us]
-//   · task_soft_reset     : activa i_soft_reset por tiempo random en [1us, 250us]
-//   · valid aleatorio     : proceso que randomiza rand_valid en cada ciclo;
-//                           i_valid es un wire que selecciona entre forced_valid
+// Activity 2 — infrastructure:
+//   · 10 MHz clock (period = 100 ns)
+//   · task_set_seed       : changes i_seed at runtime
+//   · task_async_reset    : asserts i_rst for a random duration in [1us, 250us]
+//   · task_soft_reset     : asserts i_soft_reset for a random duration in [1us, 250us]
+//   · random valid        : process that randomizes rand_valid every cycle;
+//                           i_valid is a wire that selects between forced_valid
 //
-// Actividad 3 — tests:
-//   · TEST 0a: i_rst       → o_data == DEFAULT_SEED, o_valid == 0
+// Activity 3 — tests:
+//   · TEST 0a: i_rst        → o_data == DEFAULT_SEED, o_valid == 0
 //   · TEST 0b: i_soft_reset → o_data == i_seed, o_valid == 0
-//   · TEST 0c: prioridad   → i_soft_reset gana sobre i_valid simultáneo;
-//              o_valid == 0 porque no hubo avance real de la secuencia
-//   · TEST 1 : periodicidad con DEFAULT_SEED (esperado: 65 535)
-//   · TEST 2 : periodicidad con 5 seeds random distintas
-//   · TEST 3 : valid gating — output no debe avanzar sin i_valid; o_valid
-//              debe permanecer en 0
-//   · TEST 4 : valid aleatorio — o_data vs. modelo de referencia bajo i_valid
-//              intermitente (ejercita rand_valid/rand_valid_en de Actividad 2)
-//              y o_valid vs. el i_valid muestreado un ciclo antes
+//   · TEST 0c: priority     → i_soft_reset wins over simultaneous i_valid;
+//              o_valid == 0 because there was no real sequence advance
+//   · TEST 1 : periodicity with DEFAULT_SEED (expected: 65 535)
+//   · TEST 2 : periodicity with 5 distinct random seeds
+//   · TEST 3 : valid gating — output must not advance without i_valid; o_valid
+//              must stay at 0
+//   · TEST 4 : random valid — o_data vs. reference model under intermittent
+//              i_valid (exercises rand_valid/rand_valid_en from Activity 2)
+//              and o_valid vs. the i_valid sampled one cycle earlier
 // =============================================================================
 
 `timescale 1ns / 1ps
@@ -29,19 +29,19 @@
 module tb_lfsr_generator;
 
     // =========================================================================
-    // Parámetros de simulación
+    // Simulation parameters
     // =========================================================================
     localparam CLK_PERIOD   = 100;          // 100 ns → 10 MHz
     localparam DATA_WIDTH   = 16;
     localparam DEFAULT_SEED = 16'hFFFF;
     localparam MAX_PERIOD   = (1 << DATA_WIDTH) - 1;   // 65 535
-    localparam SAFETY_LIMIT = MAX_PERIOD + 100;        // margen anti-cuelgue, escala con DATA_WIDTH
+    localparam SAFETY_LIMIT = MAX_PERIOD + 100;        // anti-hang margin, scales with DATA_WIDTH
 
     localparam RST_MIN_NS   = 1_000;        // 1 us
     localparam RST_MAX_NS   = 250_000;      // 250 us
 
     // =========================================================================
-    // Señales del DUT
+    // DUT signals
     // =========================================================================
     reg                    i_clk;
     reg                    i_rst;
@@ -51,19 +51,19 @@ module tb_lfsr_generator;
     wire                   o_valid;
 
     // =========================================================================
-    // Control de i_valid
-    //   forced_valid : controlado por las secuencias de test (initial block)
-    //   rand_valid   : randomizado por el proceso siempre-activo (always block)
-    //   i_valid      : wire que selecciona entre ambos según rand_valid_en
+    // i_valid control
+    //   forced_valid : driven by the test sequences (initial block)
+    //   rand_valid   : randomized by the always-on process (always block)
+    //   i_valid      : wire that selects between both based on rand_valid_en
     // =========================================================================
     reg  forced_valid;
     reg  rand_valid;
     reg  rand_valid_en;
 
-    wire i_valid = rand_valid_en ? rand_valid : forced_valid; // mux para test con valid aleatorio o fijos
+    wire i_valid = rand_valid_en ? rand_valid : forced_valid; // mux for random or fixed valid tests
 
     // =========================================================================
-    // Instancia del DUT
+    // DUT instance
     // =========================================================================
     lfsr_generator #(
         .DATA_WIDTH  (DATA_WIDTH),
@@ -78,25 +78,25 @@ module tb_lfsr_generator;
         .o_valid     (o_valid)
     );
 
-    // ========================================================================= Actividad 2
-    // Generación de clock — 10 MHz
+    // =========================================================================
+    // Activity 2 -- Clock generation — 10 MHz
     // =========================================================================
     initial i_clk = 1'b0;
-    always  #(CLK_PERIOD / 2) i_clk = ~i_clk; // cada 50 ns → flanco de clock
+    always  #(CLK_PERIOD / 2) i_clk = ~i_clk; // every 50 ns → clock edge
 
-    // ========================================================================= Actividad 2
-    // Proceso de valid aleatorio — solo activo cuando rand_valid_en=1
     // =========================================================================
-    initial rand_valid = 1'b0; // valor inicial
+    // Activity 2 -- Random valid process — active only when rand_valid_en=1
+    // =========================================================================
+    initial rand_valid = 1'b0; // initial value
     always @(posedge i_clk) begin
         if (rand_valid_en)
             rand_valid <= $urandom_range(0, 1);
     end
 
     // =========================================================================
-    // Modelo de referencia (TEST 4) — misma topología Galois que el DUT.
-    // Permite predecir o_data ciclo a ciclo bajo i_valid intermitente sin
-    // depender del propio DUT.
+    // Reference model (TEST 4) — same Galois topology as the DUT.
+    // Lets us predict o_data cycle by cycle under intermittent i_valid
+    // without depending on the DUT itself.
     // =========================================================================
     function [DATA_WIDTH-1:0] lfsr_step;
         input [DATA_WIDTH-1:0] s;
@@ -122,8 +122,8 @@ module tb_lfsr_generator;
         end
     endfunction
 
-    // ========================================================================= Actividad 2
-    // Task: task_set_seed — actualiza i_seed
+    // =========================================================================
+    // Activity 2 -- Task: task_set_seed — updates i_seed
     // =========================================================================
     task task_set_seed;
         input [DATA_WIDTH-1:0] new_seed;
@@ -133,35 +133,35 @@ module tb_lfsr_generator;
         end
     endtask
 
-    // ========================================================================= Actividad 2
-    // Task: task_async_reset — activa i_rst por duración random [1us, 250us]
+    // =========================================================================
+    // Activity 2 -- Task: task_async_reset — asserts i_rst for a random duration [1us, 250us]
     // =========================================================================
     task task_async_reset;
         integer rand_ns;
         begin
-            rand_ns = ($urandom % (RST_MAX_NS - RST_MIN_NS + 1)) + RST_MIN_NS; // random, modulo y desplazo
-            $display("    [task_async_reset] i_rst activo por %0d ns", rand_ns);
+            rand_ns = ($urandom % (RST_MAX_NS - RST_MIN_NS + 1)) + RST_MIN_NS; // random, modulo and offset
+            $display("    [task_async_reset] i_rst active for %0d ns", rand_ns);
             i_rst = 1'b1;
             #(rand_ns);
-            @(negedge i_clk); // evitar race condition
+            @(negedge i_clk); // avoid race condition
             i_rst = 1'b0;
             @(posedge i_clk);
             #1;
         end
     endtask
 
-    // ========================================================================= Actividad 2
-    // Task: task_soft_reset — activa i_soft_reset por duración random [1us, 250us]
+    // =========================================================================
+    // Activity 2 -- Task: task_soft_reset — asserts i_soft_reset for a random duration [1us, 250us]
     // =========================================================================
     task task_soft_reset;
         integer rand_ns;
         begin
             rand_ns = ($urandom % (RST_MAX_NS - RST_MIN_NS + 1)) + RST_MIN_NS;
-            $display("    [task_soft_reset] i_soft_reset activo por %0d ns (seed=0x%04X)",
+            $display("    [task_soft_reset] i_soft_reset active for %0d ns (seed=0x%04X)",
                      rand_ns, i_seed);
             i_soft_reset = 1'b1;
             #(rand_ns);
-            @(negedge i_clk); // evitar race condition
+            @(negedge i_clk); // avoid race condition
             i_soft_reset = 1'b0;
             @(posedge i_clk);
             #1;
@@ -169,7 +169,7 @@ module tb_lfsr_generator;
     endtask
 
     // =========================================================================
-    // Variables auxiliares de test
+    // Test helper variables
     // =========================================================================
     integer              count;
     integer              idx;
@@ -181,11 +181,11 @@ module tb_lfsr_generator;
     reg                  sampled_valid;
 
     // =========================================================================
-    // Secuencia principal de tests
+    // Main test sequence
     // =========================================================================
     initial begin
-        
-        // ---- Estado inicial de señales ----
+
+        // ---- Initial signal state ----
         i_rst         = 1'b0;
         i_soft_reset  = 1'b0;
         forced_valid  = 1'b0;
@@ -193,28 +193,28 @@ module tb_lfsr_generator;
         i_seed        = DEFAULT_SEED;
 
         // =====================================================================
-        // TEST 0a: Async reset — o_data debe ser DEFAULT_SEED
-        //   Verifica directamente que i_rst carga el seed fijo del parámetro.
+        // TEST 0a: Async reset — o_data must be DEFAULT_SEED
+        //   Directly verifies that i_rst loads the parameter's fixed seed.
         // =====================================================================
-        $display("\n[TEST 0a] Async reset — o_data debe ser DEFAULT_SEED (0x%04X)", DEFAULT_SEED);
+        $display("\n[TEST 0a] Async reset — o_data must be DEFAULT_SEED (0x%04X)", DEFAULT_SEED);
 
         task_async_reset();
 
         if (o_data === DEFAULT_SEED)
             $display("  PASS: o_data = 0x%04X", o_data);
         else
-            $display("  FAIL: esperado=0x%04X, obtenido=0x%04X", DEFAULT_SEED, o_data);
+            $display("  FAIL: expected=0x%04X, got=0x%04X", DEFAULT_SEED, o_data);
 
         if (o_valid === 1'b0)
-            $display("  PASS: o_valid = 0 tras i_rst (sin avance real)");
+            $display("  PASS: o_valid = 0 after i_rst (no real advance)");
         else
-            $display("  FAIL: o_valid = %0b tras i_rst (esperado 0)", o_valid);
+            $display("  FAIL: o_valid = %0b after i_rst (expected 0)", o_valid);
 
         // =====================================================================
-        // TEST 0b: Soft reset — o_data debe ser i_seed al finalizar el reset
-        //   Verifica que i_soft_reset carga el valor configurado en i_seed.
+        // TEST 0b: Soft reset — o_data must be i_seed once the reset ends
+        //   Verifies that i_soft_reset loads the value configured in i_seed.
         // =====================================================================
-        $display("\n[TEST 0b] Soft reset — o_data debe ser i_seed (0xA5C3)");
+        $display("\n[TEST 0b] Soft reset — o_data must be i_seed (0xA5C3)");
 
         known_seed = 16'hA5C3;
         task_set_seed(known_seed);
@@ -223,55 +223,57 @@ module tb_lfsr_generator;
         if (o_data === known_seed)
             $display("  PASS: o_data = 0x%04X", o_data);
         else
-            $display("  FAIL: esperado=0x%04X, obtenido=0x%04X", known_seed, o_data);
+            $display("  FAIL: expected=0x%04X, got=0x%04X", known_seed, o_data);
 
         if (o_valid === 1'b0)
-            $display("  PASS: o_valid = 0 tras i_soft_reset (sin avance real)");
+            $display("  PASS: o_valid = 0 after i_soft_reset (no real advance)");
         else
-            $display("  FAIL: o_valid = %0b tras i_soft_reset (esperado 0)", o_valid);
+            $display("  FAIL: o_valid = %0b after i_soft_reset (expected 0)", o_valid);
 
         // =====================================================================
-        // TEST 0c: Prioridad i_soft_reset > i_valid
-        //   Con ambas señales asertadas en el mismo flanco, i_soft_reset debe
-        //   ganar: el LFSR debe cargar i_seed, NO avanzar a lfsr_next.
+        // TEST 0c: Priority i_soft_reset > i_valid
+        //   With both signals asserted on the same edge, i_soft_reset must
+        //   win: the LFSR must load i_seed, NOT advance to lfsr_next.
         // =====================================================================
-        $display("\n[TEST 0c] Prioridad: i_soft_reset debe ganar sobre i_valid simultáneo");
+        $display("\n[TEST 0c] Priority: i_soft_reset must win over simultaneous i_valid");
 
         task_async_reset();           // LFSR = DEFAULT_SEED
         known_seed   = 16'hBEEF;
         i_seed       = known_seed;
 
-        // Asertamos ambas en el mismo ciclo de clock
+        // Assert both in the same clock cycle
         i_soft_reset = 1'b1;
         forced_valid = 1'b1;
-        @(posedge i_clk); #1;        // aquí el DUT debe cargar i_seed, no avanzar
+        @(posedge i_clk); #1;        // here the DUT must load i_seed, not advance
         i_soft_reset = 1'b0;
         forced_valid = 1'b0;
 
         if (o_data === known_seed)
-            $display("  PASS: i_soft_reset ganó — o_data = 0x%04X (= i_seed)", o_data);
+            $display("  PASS: i_soft_reset won — o_data = 0x%04X (= i_seed)", o_data);
         else
-            $display("  FAIL: o_data = 0x%04X (esperado 0x%04X); i_soft_reset no tuvo prioridad",
+            $display("  FAIL: o_data = 0x%04X (expected 0x%04X); i_soft_reset did not take priority",
                      o_data, known_seed);
 
-        // o_valid debe reflejar que este dato es un reseed, no un avance PRBS,
-        // aunque i_valid haya estado en 1 en el mismo flanco: es la prueba
-        // clave de que o_valid "viaja con" el dato en vez de ecoar i_valid.
+        // o_valid must reflect that this data is a reseed, not a PRBS
+        // advance, even though i_valid was 1 on the same edge: this is the
+        // key proof that o_valid "travels with" the data instead of
+        // echoing i_valid.
         if (o_valid === 1'b0)
-            $display("  PASS: o_valid = 0 — refleja que NO hubo avance real pese a i_valid=1");
+            $display("  PASS: o_valid = 0 — reflects that there was NO real advance despite i_valid=1");
         else
-            $display("  FAIL: o_valid = %0b (esperado 0); no debe marcarse válido un dato reseedeado",
+            $display("  FAIL: o_valid = %0b (expected 0); a reseeded data word must not be marked valid",
                      o_valid);
 
-        // ===================================================================== // Actividad 3 
-        // TEST 1: Periodicidad con DEFAULT_SEED
-        //   Se avanza el LFSR ciclo a ciclo y se cuenta hasta volver al estado
-        //   inicial. Para un LFSR maximal-length de 16 bits, el período = 65 535.
         // =====================================================================
-        $display("\n[TEST 1] Periodicidad — DEFAULT_SEED = 0x%04X", DEFAULT_SEED);
+        // Activity 3 -- TEST 1: Periodicity with DEFAULT_SEED
+        //   The LFSR is advanced cycle by cycle and counted until it returns
+        //   to the initial state. For a maximal-length 16-bit LFSR, the
+        //   period = 65 535.
+        // =====================================================================
+        $display("\n[TEST 1] Periodicity — DEFAULT_SEED = 0x%04X", DEFAULT_SEED);
 
-        task_async_reset(); // valor inicial = DEFAULT_SEED
-        forced_valid  = 1'b1; // habilitar el avance con cada ciclo
+        task_async_reset(); // initial value = DEFAULT_SEED
+        forced_valid  = 1'b1; // enable the advance on every cycle
         initial_state = o_data;
         count         = 0;
 
@@ -279,31 +281,31 @@ module tb_lfsr_generator;
 
         while (o_data !== initial_state) begin
             if (count >= SAFETY_LIMIT) begin
-                $display("  FAIL: período superó el límite de seguridad");
+                $display("  FAIL: period exceeded the safety limit");
                 $finish;
             end
             @(posedge i_clk); #1;
             count = count + 1;
         end
-        // o_data volvió al estado inicial → fin de la medición del período
+        // o_data returned to the initial state → end of period measurement
 
         if (count === MAX_PERIOD)
-            $display("  PASS: período = %0d  (2^%0d - 1 confirmado)", count, DATA_WIDTH);
+            $display("  PASS: period = %0d  (2^%0d - 1 confirmed)", count, DATA_WIDTH);
         else
-            $display("  FAIL: esperado = %0d, medido = %0d", MAX_PERIOD, count);
+            $display("  FAIL: expected = %0d, measured = %0d", MAX_PERIOD, count);
 
         forced_valid = 1'b0;
 
-        // ===================================================================== // Actividad 3
-        // TEST 2: Periodicidad con seeds random
-        //   Para cada seed: (a) async reset, (b) soft reset con seed random,
-        //   (c) medición del período. Cualquier seed ≠ 0 → período = 65 535.
         // =====================================================================
-        $display("\n[TEST 2] Periodicidad con 5 seeds aleatorias");
+        // Activity 3 -- TEST 2: Periodicity with random seeds
+        //   For each seed: (a) async reset, (b) soft reset with random seed,
+        //   (c) period measurement. Any seed ≠ 0 → period = 65 535.
+        // =====================================================================
+        $display("\n[TEST 2] Periodicity with 5 random seeds");
 
         for (idx = 0; idx < 5; idx = idx + 1) begin
-            rand_seed_val = ($urandom & 16'hFFFF); // seed random de 16 bits
-            if (rand_seed_val == 16'h0000) rand_seed_val = 16'h0001; // seria locazo, pero mejor prevenir
+            rand_seed_val = ($urandom & 16'hFFFF); // random 16-bit seed
+            if (rand_seed_val == 16'h0000) rand_seed_val = 16'h0001; // would be a corner case, better to avoid it
 
             task_async_reset();
             task_set_seed(rand_seed_val);
@@ -317,31 +319,31 @@ module tb_lfsr_generator;
 
             while (o_data !== initial_state) begin
                 if (count >= SAFETY_LIMIT) begin
-                    $display("  FAIL [seed=0x%04X]: período excedió %0d", rand_seed_val, SAFETY_LIMIT);
+                    $display("  FAIL [seed=0x%04X]: period exceeded %0d", rand_seed_val, SAFETY_LIMIT);
                     count = -1;
-                    initial_state = o_data;   // fuerza salida del while
+                    initial_state = o_data;   // forces exit from the while loop
                 end else begin
                     @(posedge i_clk); #1;
                     count = count + 1;
                 end
             end
 
-            // o_data volvió al estado inicial → fin de la medición del período
+            // o_data returned to the initial state → end of period measurement
             if (count === MAX_PERIOD)
-                $display("  PASS [seed=0x%04X] → período = %0d", rand_seed_val, count);
+                $display("  PASS [seed=0x%04X] → period = %0d", rand_seed_val, count);
             else if (count !== -1)
-                $display("  FAIL [seed=0x%04X] → esperado=%0d, medido=%0d",
+                $display("  FAIL [seed=0x%04X] → expected=%0d, measured=%0d",
                          rand_seed_val, MAX_PERIOD, count);
 
             forced_valid = 1'b0;
             task_async_reset();
         end
 
-        // ===================================================================== // extra
-        // TEST 3: Valid gating
-        //   Con i_valid=0 el estado del LFSR debe permanecer constante.
         // =====================================================================
-        $display("\n[TEST 3] Valid gating — output debe mantenerse sin i_valid");
+        // Extra -- TEST 3: Valid gating
+        //   With i_valid=0 the LFSR state must remain constant.
+        // =====================================================================
+        $display("\n[TEST 3] Valid gating — output must hold without i_valid");
 
         task_async_reset();
         initial_state = o_data;
@@ -350,48 +352,49 @@ module tb_lfsr_generator;
         repeat (50) @(posedge i_clk); #1;
 
         if (o_data === initial_state)
-            $display("  PASS: output se mantuvo constante durante 50 ciclos sin i_valid");
+            $display("  PASS: output stayed constant for 50 cycles without i_valid");
         else
-            $display("  FAIL: output cambió sin i_valid — estado inicial=0x%04X, actual=0x%04X",
+            $display("  FAIL: output changed without i_valid — initial state=0x%04X, current=0x%04X",
                      initial_state, o_data);
 
         if (o_valid === 1'b0)
-            $display("  PASS: o_valid permaneció en 0 durante el gating (sin dato nuevo)");
+            $display("  PASS: o_valid stayed at 0 during gating (no new data)");
         else
-            $display("  FAIL: o_valid = %0b sin i_valid (esperado 0)", o_valid);
+            $display("  FAIL: o_valid = %0b without i_valid (expected 0)", o_valid);
 
         forced_valid = 1'b0;
 
-        // ===================================================================== // extra
-        // TEST 4: Valid aleatorio
-        //   Activa rand_valid_en y compara o_data, ciclo a ciclo, contra un
-        //   modelo de referencia que solo avanza (lfsr_step) en los ciclos
-        //   donde el i_valid muestreado por el DUT fue 1, y se mantiene en el
-        //   resto. Ejercita el proceso rand_valid/rand_valid_en (Actividad 2)
         // =====================================================================
-        $display("\n[TEST 4] Valid aleatorio — o_data vs. modelo de referencia bajo i_valid intermitente");
+        // Extra -- TEST 4: Random valid
+        //   Enables rand_valid_en and compares o_data, cycle by cycle,
+        //   against a reference model that only advances (lfsr_step) on
+        //   cycles where the i_valid sampled by the DUT was 1, and holds
+        //   otherwise. Exercises the rand_valid/rand_valid_en process
+        //   (Activity 2)
+        // =====================================================================
+        $display("\n[TEST 4] Random valid — o_data vs. reference model under intermittent i_valid");
 
-        task_async_reset();            // lfsr = DEFAULT_SEED, sincroniza el modelo
+        task_async_reset();            // lfsr = DEFAULT_SEED, synchronizes the model
         ref_model     = o_data;
         rand_valid_en = 1'b1;
         fail_flag     = 0;
 
         for (idx = 0; idx < 3000; idx = idx + 1) begin
-            sampled_valid = i_valid;   // valor que el DUT va a muestrear en el próximo posedge
+            sampled_valid = i_valid;   // value the DUT is about to sample on the next posedge
             @(posedge i_clk); #1;
 
             if (sampled_valid)
                 ref_model = lfsr_step(ref_model);
 
             if (o_data !== ref_model) begin
-                $display("  FAIL: ciclo %0d — o_data=0x%04X, esperado=0x%04X (i_valid muestreado=%0b)",
+                $display("  FAIL: cycle %0d — o_data=0x%04X, expected=0x%04X (sampled i_valid=%0b)",
                          idx, o_data, ref_model, sampled_valid);
                 fail_flag = 1;
             end
 
-            // o_valid debe viajar junto con o_data
+            // o_valid must travel together with o_data
             if (o_valid !== sampled_valid) begin
-                $display("  FAIL: ciclo %0d — o_valid=%0b, esperado=%0b (debe viajar con o_data)",
+                $display("  FAIL: cycle %0d — o_valid=%0b, expected=%0b (must travel with o_data)",
                          idx, o_valid, sampled_valid);
                 fail_flag = 1;
             end
@@ -400,12 +403,12 @@ module tb_lfsr_generator;
         rand_valid_en = 1'b0;
 
         if (!fail_flag)
-            $display("  PASS: o_data y o_valid coincidieron con el modelo de referencia en 3000 ciclos de valid aleatorio");
+            $display("  PASS: o_data and o_valid matched the reference model over 3000 cycles of random valid");
         else
-            $display("  FAIL: hubo al menos un mismatch bajo valid aleatorio (ver detalle arriba)");
+            $display("  FAIL: at least one mismatch occurred under random valid (see detail above)");
 
         // =====================================================================
-        $display("\n[DONE] Simulación completa.\n");
+        $display("\n[DONE] Simulation complete.\n");
         $finish;
     end
 
