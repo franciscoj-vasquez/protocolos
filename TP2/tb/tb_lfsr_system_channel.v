@@ -118,7 +118,7 @@ module tb_lfsr_system_channel;
 
     // =========================================================================
     // Random valid process — active only when rand_valid_en=1 (same
-    // mechanism as tb_lfsr_generator.v / tb_lfsr_system.v)
+    // mechanism as tb_lfsr_generator.v)
     // =========================================================================
     initial rand_valid = 1'b0;
     always @(posedge i_clk) begin
@@ -194,9 +194,9 @@ module tb_lfsr_system_channel;
     endtask
 
     // =========================================================================
-    // Task: send_valid / send_invalid — same as tb_lfsr_system.v (50/50
-    //   random gating of i_valid until n data words are delivered), with
-    //   the drain generalized to (chan_delay + 1) cycles (see header).
+    // Task: send_valid / send_invalid — 50/50 random gating of i_valid
+    //   until n data words are delivered, with the drain generalized to
+    //   (chan_delay + 1) cycles (see file header).
     // =========================================================================
     task send_valid;
         input integer n;

@@ -43,7 +43,7 @@ iverilog -g2012 -o sim_gen.vvp tb/tb_lfsr_generator.v rtl/lfsr_generator.v && vv
 iverilog -g2012 -I tb -o sim_chan.vvp tb/tb_lfsr_system_channel.v tb/channel_delay.v rtl/lfsr_generator.v rtl/lfsr_checker.v && vvp sim_chan.vvp
 ```
 
-`-I tb` is only needed for the system testbench: it lets `` `include "tests/test_c0.v" `` (and the rest) inside `tb_lfsr_system_channel.v` resolve, since Icarus does not search relative to the including file by default.
+`-I tb` is only needed for the system testbench: it lets `` `include "tests/test_direct_connection.v" `` (and the rest) inside `tb_lfsr_system_channel.v` resolve, since Icarus does not search relative to the including file by default.
 
 `rtl/fsm_style/` is an extension not requested by the assignment — see its own section further below for what it is and how it was verified.
 

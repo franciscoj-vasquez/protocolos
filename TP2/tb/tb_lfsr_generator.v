@@ -8,7 +8,8 @@
 //   · task_async_reset    : asserts i_rst for a random duration in [1us, 250us]
 //   · task_soft_reset     : asserts i_soft_reset for a random duration in [1us, 250us]
 //   · random valid        : process that randomizes rand_valid every cycle;
-//                           i_valid is a wire that selects between forced_valid
+//                           i_valid muxes between forced_valid and rand_valid
+//                           based on rand_valid_en
 //
 // Activity 3 — tests:
 //   · TEST 0a: i_rst        → o_data == DEFAULT_SEED, o_valid == 0
@@ -255,9 +256,7 @@ module tb_lfsr_generator;
                      o_data, known_seed);
 
         // o_valid must reflect that this data is a reseed, not a PRBS
-        // advance, even though i_valid was 1 on the same edge: this is the
-        // key proof that o_valid "travels with" the data instead of
-        // echoing i_valid.
+        // advance, even though i_valid was 1 on the same edge.
         if (o_valid === 1'b0)
             $display("  PASS: o_valid = 0 — reflects that there was NO real advance despite i_valid=1");
         else
@@ -366,10 +365,7 @@ module tb_lfsr_generator;
 
         // =====================================================================
         // Extra -- TEST 4: Random valid
-        //   Enables rand_valid_en and compares o_data, cycle by cycle,
-        //   against a reference model that only advances (lfsr_step) on
-        //   cycles where the i_valid sampled by the DUT was 1, and holds
-        //   otherwise. Exercises the rand_valid/rand_valid_en process
+        //   Exercises the rand_valid/rand_valid_en process
         //   (Activity 2)
         // =====================================================================
         $display("\n[TEST 4] Random valid — o_data vs. reference model under intermittent i_valid");
