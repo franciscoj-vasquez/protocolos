@@ -1,0 +1,5 @@
+.venv/
+repo_jf/ethernet-phy-labs/*/obj_dir/
+repo_jf/ethernet-phy-labs/*/*.vcd
+repo_jf/ethernet-phy-labs/*/*.pcap
+__pycache__/

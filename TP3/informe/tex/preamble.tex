@@ -1,0 +1,79 @@
+% ---------------------------------------------------------------------------
+% Common LaTeX preamble for the TP3 report (included with pandoc -H).
+% Language-specific labels (\tp...) live in preamble-es.tex / preamble-en.tex.
+% ---------------------------------------------------------------------------
+
+% Figures stay where they are written in the markdown
+\usepackage{float}
+\floatplacement{figure}{H}
+
+% Captions: small font, bold label
+\usepackage{caption}
+\captionsetup{font=small, labelfont=bf, margin=0.6cm}
+
+% Smaller code blocks, long lines wrapped
+\usepackage{fvextra}
+\DefineVerbatimEnvironment{Highlighting}{Verbatim}{breaklines,breakanywhere,commandchars=\\\{\},fontsize=\small}
+\makeatletter
+\renewcommand{\verbatim@font}{\ttfamily\small}
+\makeatother
+
+% Tables a bit smaller than body text
+\usepackage{etoolbox}
+\AtBeginEnvironment{longtable}{\small}
+
+% Block quotes (used for side notes) with a bar on the left
+\usepackage{framed}
+\renewenvironment{quote}{\begin{leftbar}\small}{\end{leftbar}}
+
+% Paragraph spacing instead of indentation
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{0.55em plus 0.2em minus 0.1em}
+
+% Header / footer
+\usepackage{fancyhdr}
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\small\itshape \tpHeader}
+\fancyhead[R]{\small\itshape \nouppercase{\leftmark}}
+\fancyfoot[C]{\small \thepage}
+\renewcommand{\headrulewidth}{0.4pt}
+\setlength{\headheight}{14pt}
+
+% Title page built from pandoc's title / subtitle / author / date.
+% \subtitle is defined here first so pandoc's \providecommand does not append it to \@title.
+\makeatletter
+\def\@subtitle{}
+\newcommand{\subtitle}[1]{\gdef\@subtitle{#1}}
+\renewcommand{\maketitle}{%
+  \hypersetup{pageanchor=false}%
+  \begin{titlepage}
+    \centering
+    \vspace*{1.2cm}
+    {\large\scshape \tpInstitution\par}
+    \vspace{0.3cm}
+    {\large \tpCourse\par}
+    \vspace{3.2cm}
+    \rule{\linewidth}{0.8pt}\par
+    \vspace{0.6cm}
+    {\LARGE\bfseries \@title\par}
+    \vspace{0.5cm}
+    {\large \@subtitle\par}
+    \vspace{0.6cm}
+    \rule{\linewidth}{0.8pt}\par
+    \vfill
+    {\large \tpStudentLabel: \@author\par}
+    \vspace{0.3cm}
+    {\normalsize \tpTeachersLabel: \tpTeachers\par}
+    \vspace{1.5cm}
+    {\normalsize \@date\par}
+    \vspace*{0.8cm}
+  \end{titlepage}
+  \hypersetup{pageanchor=true}%
+  \pagenumbering{roman}%
+}
+\makeatother
+
+% Table of contents on its own page (roman numbers), body starts at page 1
+\let\tpOldToc\tableofcontents
+\renewcommand{\tableofcontents}{\tpOldToc\clearpage\pagenumbering{arabic}}

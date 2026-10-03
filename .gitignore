@@ -1,2 +1,9 @@
 project_1
 project_2
+
+# Waveforms grandes (GitHub rechaza archivos >100 MB)
+TP3/capturas/lab3/vcd_pcap_originales/lab3_fase2_con_scrambler.fst
+TP3/capturas/lab1/vcd_pcap_originales/lab1_waveform.vcd
+
+# Clon del repo de la cátedra (tiene su propio .git)
+TP3/repo_jf/
