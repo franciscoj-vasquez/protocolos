@@ -1,0 +1,15 @@
+# DUT clone (pinned commit, recreate with scripts/get_taxi.sh)
+repo_taxi/
+
+# Python
+verif/.venv/
+__pycache__/
+.pytest_cache/
+
+# cocotb / Verilator artefacts
+sim_build/
+results.xml
+dump.fst
+dump.vcd
+*.fst.hier
+verif/tb/*/reports/

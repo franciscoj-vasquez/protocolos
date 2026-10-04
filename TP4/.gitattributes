@@ -1,0 +1,6 @@
+# scripts and makefiles must keep LF line endings (they run on Linux)
+*.sh     text eol=lf
+*.mk     text eol=lf
+Makefile text eol=lf
+*.py     text eol=lf
+*.sv     text eol=lf
