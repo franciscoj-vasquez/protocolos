@@ -6,6 +6,7 @@ IEEE 802.3. Esta primera fase cubre el bloque **XGMII ↔ PCS 64B/66B** (cláusu
 (`taxi_eth_mac_10g`) y el MAC+PHY (`taxi_eth_mac_phy_10g`) quedan para las fases siguientes.
 
 - Plan de verificación: [docs/plan_de_verificacion.md](docs/plan_de_verificacion.md)
+- Revisión del RTL contra la norma (hallazgos preliminares): [docs/revision_rtl.md](docs/revision_rtl.md)
 - Puesta a punto del entorno (Ubuntu): [docs/entorno.md](docs/entorno.md)
 - Entorno de verificación (cocotb + Verilator): [verif/](verif/)
 
@@ -93,6 +94,7 @@ TP4/
 ├── README.md                  este archivo (notas de clase, arquitectura, estado)
 ├── docs/
 │   ├── plan_de_verificacion.md  requisitos, casos de prueba, cobertura, criterios
+│   ├── revision_rtl.md          revisión del RTL contra la norma (hallazgos preliminares)
 │   ├── entorno.md               instalación en Ubuntu y uso (make, ondas, semillas)
 │   ├── Tutorial - cocotb.pdf    tutorial de la cátedra (verilog-ethernet + Icarus)
 │   └── img/
@@ -136,14 +138,16 @@ problemas frecuentes en [docs/entorno.md](docs/entorno.md).
 | Scripts de entorno para Ubuntu | escritos, sin probar en la laptop |
 | VIP: modelo de referencia, PRBS, armado/parseo de tramas, emulación de línea | **53/53 self-tests pasan** (Python 3.12, sin simulador) |
 | Testbenches cocotb (enc, dec, PHY, full duplex) | escritos; importan con cocotb 2.0.1; **falta correrlos con Verilator** |
-| Ejecución, resultados y hallazgos | pendiente (en la laptop con Ubuntu) |
+| Revisión estática del RTL contra la cláusula 49 | 6 hallazgos preliminares (H1–H6): sin Local Fault, sin diagramas de estados TX/RX, detalles del monitor de BER, gestión incompleta |
+| Ejecución, resultados y evidencia de los hallazgos | pendiente (en la laptop con Ubuntu) |
 | Fase 2: MAC 10G y MAC+PCS | pendiente |
 
 ## Próximos pasos
 
 1. En Ubuntu: `scripts/setup_ubuntu.sh` y correr un test upstream de taxi como chequeo del entorno.
 2. `make selftest` y luego cada testbench con `WAVES=1`; revisar en GTKWave los primeros casos.
-3. Ajustar lo que haga falta en los testbenches (primera ejecución real).
+3. Ajustar lo que haga falta en los testbenches (primera ejecución real). Los tests que deberían
+   fallar según la revisión del RTL están listados en [docs/revision_rtl.md](docs/revision_rtl.md).
 4. Completar la columna "Resultado" del plan y redactar los hallazgos (en norma / no en norma, con
    evidencia: log, tiempo de simulación y captura de GTKWave).
 5. Fase 2: reutilizar los agentes para la MAC (`taxi_eth_mac_10g`) y el MAC+PCS.

@@ -7,7 +7,8 @@ Repo de trabajos prácticos: TP1–TP3 terminados (informes en `docs/` y `TP3/in
 - Conversación en español. Informes en Markdown → PDF con pandoc (ver `TP3/informe/build.sh`), en
   español (`Informe_*.md`) e inglés (`Report_*.md`). Código y comentarios en inglés.
 - Las herramientas HDL (Verilator, GTKWave, cocotb) corren en la laptop con Ubuntu. La PC con Windows
-  no tiene Python ni Verilator.
+  tiene Python 3.12, pero no pytest, cocotb, Verilator ni WSL: ahí solo corre el modelo puro de
+  `vip/`.
 - Cuando el usuario traiga comentarios de clase, sumarlos a "Notas de clase" de `TP4/README.md` y
   reflejarlos en el plan.
 
@@ -29,20 +30,26 @@ y `TP4/docs/entorno.md`.
   - `selftest/`: pytest sin simulador;
   - `tb/<testbench>/`: Makefile + `test_*.py`.
 
-## Estado al 2026-10-04
+## Estado al 2026-10-12
 
-- Escrito: plan v1, documentación, scripts de instalación, VIP y cuatro testbenches (encoder, decoder,
-  PHY y full duplex).
+- Escrito: plan v1.1, documentación, scripts de instalación, VIP y cuatro testbenches (encoder,
+  decoder, PHY y full duplex).
 - Verificado sin simulador: 53/53 self-tests; los módulos de test importan con cocotb 2.0.1.
-- **Nunca se corrió con Verilator**: la primera ejecución en Ubuntu probablemente pida ajustes.
+- Revisión estática del RTL contra la cláusula 49 en `TP4/docs/revision_rtl.md`: 6 hallazgos
+  preliminares, que pasan a "no cumple" recién con evidencia de simulación.
+  - H1: no se envía Local Fault (LBLOCK_R) con `!block_lock` o con `hi_ber`.
+  - H2 y H3: decoder y encoder sin las máquinas de estado RX/TX; en 6 de las 9 secuencias de [DF] la
+    salida difiere de la norma.
+  - H4: el monitor de BER no se reinicia con `!block_lock` (falta confirmar el texto de la norma).
+  - H5: `hi_ber` se libera con ≤ 14 errores por ventana en vez de < 16 (test nuevo
+    `test_phy_rx_hi_ber_release_15`).
+  - H6: no hay `signal_ok`, patrones de prueba ni contadores de gestión.
+- **Nunca se corrió con Verilator**: la primera ejecución en Ubuntu probablemente pida ajustes. Los
+  tests asociados a H1–H5 *deberían fallar*.
 - Próximo paso, en este orden:
   1. `bash TP4/scripts/setup_ubuntu.sh`;
   2. `make selftest`;
   3. `tb/xgmii_baser_enc`, después decoder, PHY (loopback) y full duplex;
-  4. completar la tabla de veredictos (sección 10 del plan).
-- Hipótesis a confirmar (no son resultados):
-  - encoder y decoder sin las máquinas de estado TX/RX de la cláusula 49;
-  - no se envía Local Fault (LBLOCK_R) con `!block_lock` o con `hi_ber`;
-  - el monitor de BER no se reinicia con `!block_lock`.
+  4. completar la tabla de veredictos (sección 10 del plan) con evidencia (log + GTKWave).
 - No se tiene el texto de 802.3; se usaron fuentes públicas: diagramas de UNH-IOL (cláusula 49) y la
   tabla de secuencias de ejemplo de IEEE P802.3df (Opsasnick, 2022). Ver la sección 2 del plan.

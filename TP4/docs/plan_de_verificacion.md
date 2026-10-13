@@ -1,7 +1,8 @@
 # Plan de verificación — PCS 10GBASE-R de *taxi* (fase 1: XGMII ↔ PCS)
 
-Versión 1 (octubre 2026). Estado de ejecución: tests escritos, pendientes de correr con Verilator
-(ver [Estado](#10-estado-y-registro-de-resultados)).
+Versión 1.1 (octubre 2026). Estado de ejecución: tests escritos, pendientes de correr con Verilator.
+Hay una revisión estática del RTL con veredictos preliminares
+(ver [Estado](#10-estado-y-registro-de-resultados) y [revision_rtl.md](revision_rtl.md)).
 
 ## 1. Objetivo y alcance
 
@@ -234,6 +235,7 @@ Directorio `verif/tb/<testbench>/`; comando `make COCOTB_TEST_FILTER=<test>`.
 | `test_phy_rx_lock_offsets` | top split | dir. | 19 corrimientos (1…65 bits): *slips* = 66−k; lock ≥ 64 ciclos después de alinear; tráfico OK luego | LOCK-01, LOCK-02, LOCK-05 | P1 |
 | `test_phy_rx_lock_hold_and_loss` | top split | dir. | 15 cabeceras malas seguidas: no pierde lock; 31 seguidas: lo pierde (≤ 47 ciclos) y vuelve ≥ 64 ciclos después | LOCK-03, LOCK-04, LOCK-05 | P1 |
 | `test_phy_rx_hi_ber` | top split | dir. | 15 errores espaciados: `hi_ber` = 0; 31 espaciados (sin perder lock): `hi_ber` = 1; se libera entre 1 y 2 ventanas | BER-01…03 | P1 |
+| `test_phy_rx_hi_ber_release_15` | top split | dir. | con `hi_ber` activo, una ventana con exactamente 15 cabeceras inválidas (< 16) lo libera al terminar esa ventana; la fase de la ventana se toma de una liberación anterior | BER-03 | P2 |
 | `test_phy_rx_hi_ber_reset_on_unlock` | top split | dir. | línea desalineada (sin lock): `hi_ber` debe quedar en 0 | BER-04 | P2 |
 | `test_phy_rx_local_fault` | top split | dir. | sin lock y con `hi_ber`: todas las palabras XGMII son *Local Fault* | RXSM-04, XG-03 | P1 |
 | `test_phy_rx_error_handling` | top split | aleat. | errores de bit en la carga + bloques inválidos; XGMII = diagrama RX sobre el flujo recibido | RXSM-05 | P2 |
@@ -277,16 +279,28 @@ Cada test escribe `reports/cov_<test>.json` y muestra los *bins* no cubiertos en
 | Ítem | Estado |
 |---|---|
 | Self-tests del VIP (`make selftest`) | 53/53 pasan (Python 3.12, sin simulador) |
+| Revisión estática del RTL contra la norma | hecha el 2026-10-12: 6 hallazgos ([revision_rtl.md](revision_rtl.md)) |
 | Testbenches | escritos; importan con cocotb 2.0.1; **sin ejecutar con Verilator** |
 
-Veredicto por requisito (completar tras la ejecución):
+Veredicto por requisito. La columna "Preliminar" sale de la revisión del RTL
+([revision_rtl.md](revision_rtl.md)). La columna "Resultado" se completa al simular, con evidencia
+(sección 9).
 
-| Requisito | Resultado | Evidencia |
-|---|---|---|
-| XG-01…03, ENC-01…06, SCR-01…03, DEC-01…06 | pendiente | |
-| TXSM-01…04, RXSM-01…05 | pendiente | |
-| LOCK-01…05, BER-01…05 | pendiente | |
-| LAT-01, TP-01…03, E2E-01…04, FD-01…02 | pendiente | |
+| Requisito | Preliminar (inspección) | Resultado (simulación) | Evidencia |
+|---|---|---|---|
+| XG-01, XG-02, ENC-01…06, SCR-01…03, DEC-01…04, DEC-06 | cumple | pendiente | |
+| XG-03, RXSM-04 | **no cumple** (H1: sin Local Fault) | pendiente | |
+| RXSM-01 | cumple (bloque tipo E → 8 × /E/) | pendiente | |
+| RXSM-02, RXSM-03, RXSM-05, DEC-05 | **no cumple** (H2: sin diagrama RX) | pendiente | |
+| TXSM-01…04 | **no cumple** (H3: sin diagrama TX) | pendiente | |
+| LOCK-01…05 | cumple | pendiente | |
+| BER-01, BER-02, BER-05 | cumple | pendiente | |
+| BER-03 | **no cumple** en el borde (H5: libera con ≤ 14, no con ≤ 15) | pendiente | |
+| BER-04 | **no cumple** (H4), falta confirmar el texto de la norma | pendiente | |
+| LAT-01 | cumple (4 ciclos = 256 BT) | pendiente | |
+| TP-01, TP-02 | sin observaciones | pendiente | |
+| TP-03 | no implementado (H6), falta confirmar si es obligatorio | pendiente | |
+| E2E-01…04, FD-01…02 | se espera que cumplan (sin errores de secuencia en la línea) | pendiente | |
 
 ## 11. Riesgos, supuestos y limitaciones
 
@@ -303,20 +317,24 @@ Veredicto por requisito (completar tras la ejecución):
 - **Modelo de referencia**: puede tener errores; se mitiga con vectores externos y con la regla 3 de
   la sección 9.
 
-## 12. Observaciones previas (hipótesis a confirmar)
+## 12. Revisión del RTL (hallazgos preliminares)
 
-Al leer los puertos y parámetros del RTL para armar los agentes se vieron indicios que orientaron la
-prioridad de algunos tests. **No son resultados**: se confirman o descartan al ejecutar.
+Las hipótesis de la versión 1 se revisaron leyendo el RTL completo de la PCS (codificador,
+decodificador, *block lock*, monitor de BER, *watchdog* e interfaces TX/RX) y comparándolo con la
+cláusula 49. El detalle, con archivo y línea, contraejemplo e impacto, está en
+[revision_rtl.md](revision_rtl.md). **Siguen siendo preliminares**: los veredictos se confirman al
+simular.
 
-| Hipótesis | Tests que la confirman o descartan |
-|---|---|
-| El encoder y el decoder trabajan bloque a bloque: no se ven los estados TX_E / RX_E ni el *look-ahead* de `R_TYPE_NEXT`; el encoder no usa `rst` con `DATA_W = 64` | `test_enc_invalid_xgmii`, `test_enc_ieee_sequences`, `test_dec_ieee_sequences`, `test_dec_invalid_blocks`, `test_phy_tx_lblock_in_reset` |
-| No se encontró la generación de LBLOCK_R (*Local Fault*) cuando falta block lock o hay `hi_ber` | `test_phy_rx_local_fault` |
-| El monitor de BER solo se reinicia con `rst`, no con `!block_lock` (el test original de *taxi* incluso espera `hi_ber = 1` tras perder el lock) | `test_phy_rx_hi_ber_reset_on_unlock` |
-| `rx_status` es una señal propia (*watchdog*), distinta de `PCS_status` (= block_lock ∧ ¬hi_ber) | informativo |
-| Solo hay modo de prueba PRBS31: no se ven los patrones *square wave* / *pseudo-random* ni registros de gestión (MDIO, contadores de BER y de bloques errados de 49.2.14) | TP-03, inspección de interfaz |
+| # | Hallazgo | Tests que lo confirman |
+|---|---|---|
+| H1 | No se envía LBLOCK_R (*Local Fault*) a la XGMII con `!block_lock` o `hi_ber`: el decodificador no recibe esas señales | `test_phy_rx_local_fault` |
+| H2 | El decodificador trabaja bloque a bloque: no tiene el diagrama RX ni el *look-ahead* `R_TYPE_NEXT`. Un código inválido pone /E/ solo en su carril. En 6 de las 9 secuencias de [DF] la salida difiere de la norma | `test_dec_ieee_sequences`, `test_dec_invalid_blocks`, `test_phy_rx_error_handling` |
+| H3 | El codificador trabaja palabra a palabra: no tiene el diagrama TX ni manda LBLOCK_T en reset. En 6 de las 9 secuencias de [DF] la salida difiere | `test_enc_invalid_xgmii`, `test_enc_ieee_sequences`, `test_phy_tx_lblock_in_reset` |
+| H4 | El monitor de BER solo se reinicia con `rst`, no con `!block_lock`. El test original de *taxi* incluso espera `hi_ber = 1` después de perder el lock | `test_phy_rx_hi_ber_reset_on_unlock` |
+| H5 | `hi_ber` se libera solo si hubo ≤ 14 cabeceras inválidas en la ventana; la norma pide < 16 | `test_phy_rx_hi_ber_release_15` |
+| H6 | No hay entrada `signal_ok`, patrones *square wave* / *pseudo-random* ni contadores de 49.2.14 | TP-03, inspección de interfaz |
 
-Si se confirman, conviene acompañar cada hallazgo con su **impacto**: por ejemplo, un error de
-secuencia que la PCS no convierte en /E/ puede igual ser detectado por la FCS de la MAC del otro
-extremo, mientras que la ausencia de *Local Fault* impide que la capa de reconciliación (RS) informe
-la caída del enlace (*link fault signaling*, 46.3.4).
+Informativo: `rx_status` es una señal propia de *taxi* (*watchdog*) y no equivale a `PCS_status`
+(= block_lock ∧ ¬hi_ber). En todo `src/eth/rtl` no hay *link fault signaling*: la MAC tampoco
+procesa Local o Remote Fault, así que H1 no se nota dentro de *taxi*, pero sí al integrar el IP con
+una RS que cumpla la norma.

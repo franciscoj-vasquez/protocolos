@@ -103,6 +103,15 @@ class PhyTB:
                 return now_ps()
         raise AssertionError(f"block lock not lost after {timeout} cycles")
 
+    async def wait_edge(self, kind, name, after, timeout):
+        """Time of the first `kind` ("rises" / "falls") of a status output after `after`."""
+        for _ in range(timeout):
+            await RisingEdge(self.dut.rx_clk)
+            edges = getattr(self.status, kind)(name, after=after)
+            if edges:
+                return edges[0]
+        raise AssertionError(f"{name}: no {kind} within {timeout} cycles")
+
     # -- TX side ----------------------------------------------------------
     def tx_check(self, name, strict=True):
         sm = baser.TxStateMachine()
@@ -322,6 +331,49 @@ async def test_phy_rx_hi_ber(dut):
     assert falls, "hi_ber never cleared"
     assert falls[0] - rises[0] >= (W - 8) * PERIOD_PS, "hi_ber cleared before a full window"
     assert falls[0] - t_last <= (2 * W + 32) * PERIOD_PS, "hi_ber cleared too late"
+
+
+@cocotb.test()
+async def test_phy_rx_hi_ber_release_15(dut):
+    """BER-03 (threshold): with hi_ber set, a 125 us window with 15 invalid headers
+    (ber_cnt < 16) ends in GOOD_BER, so hi_ber clears at the end of that window.
+    The window phase is taken from a first hi_ber release (the timer is internal);
+    errors stay M cycles away from the window edges."""
+    W, M = COUNT_125US, 20
+    assert W >= 20 * 5 + 2 * M, "COUNT_125US too small for this test"
+    tb = PhyTB(dut, "phy_rx_hi_ber_15")
+    await tb.reset()
+    await tb.wait_lock()
+    tb.pdrv.follow_slip = False
+    t0 = now_ps()
+    start = tb.pdrv.index + 8
+    tb.pdrv.line_hook = HdrCorrupt(range(start, start + 31 * 5, 5))
+    t_rise = await tb.wait_edge("rises", "hi_ber", t0, 2 * W + 200)
+    b0 = await tb.wait_edge("falls", "hi_ber", t_rise, 3 * W + 100)
+
+    def window(k):                         # start of the k-th window after b0
+        return b0 + k * W * PERIOD_PS
+
+    def index_at(t):
+        return tb.pdrv.index + (t - now_ps()) // PERIOD_PS
+
+    # window 1: 20 invalid headers (>= 16, spaced 5 so block lock is kept) -> hi_ber
+    # window 2: exactly 15 invalid headers -> hi_ber must clear at its end
+    s1, s2 = index_at(window(1)) + M, index_at(window(2)) + M
+    tb.pdrv.line_hook = HdrCorrupt(list(range(s1, s1 + 20 * 5, 5)) + list(range(s2, s2 + 15 * 8, 8)))
+    t_b = now_ps()
+    await ClockCycles(dut.rx_clk, (window(4) - t_b) // PERIOD_PS + 2 * M)
+    rises = tb.status.rises("hi_ber", after=t_b)
+    falls = [t for t in tb.status.falls("hi_ber", after=t_b) if rises and t > rises[0]]
+    lock_falls = tb.status.falls("lock", after=t0)
+    tb.log.info("windows @ %s ns | hi_ber rise %s fall %s | expected fall ~%.1f ns",
+                [round(window(k) / 1000, 1) for k in range(5)], rises, falls, window(3) / 1000)
+    assert not lock_falls, "block lock lost (test assumes it is kept)"
+    assert rises and rises[0] < window(2), "hi_ber not set by 20 invalid headers in a window"
+    assert falls, "hi_ber never cleared"
+    assert abs(falls[0] - window(3)) <= M * PERIOD_PS, (
+        f"hi_ber cleared @ {falls[0] / 1000:.1f} ns; expected at the end of the window "
+        f"with 15 invalid headers (~{window(3) / 1000:.1f} ns)")
 
 
 @cocotb.test()
